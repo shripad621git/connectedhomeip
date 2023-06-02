@@ -13,15 +13,21 @@
 # limitations under the License.
 
 import("//build_overrides/pigweed.gni")
+import("//build_overrides/chip.gni")
+import("${chip_root}/src/platform/device.gni")
 
 declare_args() {
   chip_build_pw_trace_lib = false
+  chip_matter_custom_trace = false
 }
 
 config("config") {
   defines = [ "PW_TRACE_BACKEND_SET" ]
 }
 
+config("configuration"){
+  defines = [ "MATTER_CUSTOM_TRACE" ]
+}
 source_set("trace") {
   sources = [
     "trace.cpp",
@@ -30,5 +36,13 @@ source_set("trace") {
   if (chip_build_pw_trace_lib) {
     public_configs = [ ":config" ]
     public_deps = [ "${dir_pigweed}/pw_trace" ]
+  }
+  if (chip_device_platform == "esp32" && chip_matter_custom_trace) {
+     public_configs = [ ":configuration"]
+     sources += [
+         "${chip_root}/src/platform/ESP32/MatterCustomTrace.h",
+         "${chip_root}/src/platform/ESP32/MatterCustomTrace.cpp"
+     ]
+     deps = ["${chip_root}/src/system"]
   }
 }

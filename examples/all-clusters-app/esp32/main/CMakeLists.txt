@@ -113,6 +113,7 @@ set(SRC_DIRS_LIST  "${SRC_DIRS_LIST}"
 )
 endif (CONFIG_ENABLE_PW_RPC)
 
+
 set(PRIV_REQUIRES_LIST chip QRCode bt driver app_update nvs_flash spi_flash openthread)
 if(CONFIG_HAVE_DISPLAY)
     list(APPEND PRIV_REQUIRES_LIST tft spidrier screen-framework)
@@ -139,6 +140,13 @@ target_compile_options(${COMPONENT_LIB} PRIVATE "-DCHIP_HAVE_CONFIG_H")
 target_compile_options(${COMPONENT_LIB} PUBLIC
            "-DCHIP_ADDRESS_RESOLVE_IMPL_INCLUDE_HEADER=<lib/address_resolve/AddressResolve_DefaultImpl.h>"
 )
+
+if (CONFIG_ENABLE_INSIGHTS_CUSTOM_TRACE)
+
+target_compile_options(${COMPONENT_LIB} PRIVATE
+                       "-DMATTER_CUSTOM_TRACE=1")
+
+endif (CONFIG_ENABLE_INSIGHTS_CUSTOM_TRACE)
 
 if (CONFIG_ENABLE_PW_RPC)
 

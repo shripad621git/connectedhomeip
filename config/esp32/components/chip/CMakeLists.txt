@@ -31,7 +31,7 @@ endif()
 
 include(${CMAKE_CURRENT_LIST_DIR}/ota-image.cmake)
 
-set(CHIP_REQUIRE_COMPONENTS esp_eth freertos lwip bt mbedtls fatfs app_update console openthread nvs_flash spi_flash)
+set(CHIP_REQUIRE_COMPONENTS esp_eth freertos lwip bt mbedtls fatfs app_update console openthread nvs_flash spi_flash esp_insights)
 
 if(NOT "${IDF_TARGET}" STREQUAL "esp32h2")
     list(APPEND CHIP_REQUIRE_COMPONENTS mdns)
@@ -126,6 +126,10 @@ endif()
 
 if(CHIP_CODEGEN_PREGEN_DIR)
     chip_gn_arg_append("chip_code_pre_generated_directory"  "\"${CHIP_CODEGEN_PREGEN_DIR}\"")
+endif()
+
+if(CONFIG_ENABLE_INSIGHTS_CUSTOM_TRACE)
+    chip_gn_arg_append("chip_matter_custom_trace"        "true")
 endif()
 
 if(CONFIG_ENABLE_PW_RPC)
@@ -401,6 +405,12 @@ if (CONFIG_SEC_CERT_DAC_PROVIDER)
     idf_component_get_property(esp32_secure_cert_mgr_lib espressif__esp_secure_cert_mgr COMPONENT_LIB)
     list(APPEND chip_libraries $<TARGET_FILE:${esp32_secure_cert_mgr_lib}>)
 endif()
+
+if (CONFIG_ENABLE_INSIGHTS_CUSTOM_TRACE)
+    idf_component_get_property(esp_insights_lib esp_insights COMPONENT_LIB)
+    list(APPEND chip_libraries $<TARGET_FILE:${esp_insights_lib}>)
+endif()
+
 
 idf_component_get_property(lwip_lib lwip COMPONENT_LIB)
 list(APPEND chip_libraries $<TARGET_FILE:${lwip_lib}>)

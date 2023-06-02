@@ -83,6 +83,12 @@ menu "CHIP Core"
             help
                 Link the application with the library containing Pigweed RPC functionalities
 
+        config ENABLE_INSIGHTS_CUSTOM_TRACE
+            bool "Enable Custom Trace functionality for ESP-Insights"
+            default n
+            help
+                Helps to take custom implementation of TRACE_EVENT macros.
+
         config USE_MINIMAL_MDNS
             bool "Use the minimal mDNS implementation shipped in the CHIP library"
             default y

@@ -21,9 +21,10 @@ namespace chip {
 void InitializeTracing();
 } // namespace chip
 
+
 #if defined(MATTER_CUSTOM_TRACE) && MATTER_CUSTOM_TRACE
 
-#include "trace/MatterCustomTrace.h"
+#include <platform/ESP32/MatterCustomTrace.h>
 
 #else // MATTER_CUSTOM_TRACE
 

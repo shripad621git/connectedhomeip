@@ -41,6 +41,8 @@
 #include <credentials/DeviceAttestationCredsProvider.h>
 #include <credentials/examples/DeviceAttestationCredsExample.h>
 #include <platform/ESP32/ESP32Utils.h>
+#include <esp_insights.h>
+
 
 #if CONFIG_HAVE_DISPLAY
 #include "DeviceWithDisplay.h"
@@ -65,6 +67,10 @@
 #else
 #include <DeviceInfoProviderImpl.h>
 #endif // CONFIG_ENABLE_ESP32_DEVICE_INFO_PROVIDER
+
+#ifdef CONFIG_ESP_INSIGHTS_TRANSPORT_HTTPS
+#define ESP_INSIGHTS_AUTH_KEY "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyIjoiNzk4MGZiZDUtNDJjYi00MTdiLWE0ZTEtZWZkZTI1ZjQ4MTI3IiwiaXNzIjoiZTMyMmI1OWMtNjNjYy00ZTQwLThlYTItNGU3NzY2NTQ1Y2NhIiwic3ViIjoiNGJkNjMwOGQtNGQ3Yy00MmI4LWFlZjYtOTQwMWI1NGE4YjFjIiwiZXhwIjoyMDAxMzkwODUxLCJpYXQiOjE2ODYwMzA4NTF9.ZDw1FozsDg9cYL9q8RRs0z40Epc1z45ZHweMD61STu3XosvqMvskBGzzwsyejx4HliBqD8EXFtfo4eKF6MvJbATyHHsW4hbEQ1XQ3Kc9mSSMDmCfw79AYmgR4yMn3U1SyRx3wARq5CFqC9KrJNnc1SyfohswoVViXvmXjY2HER_Vdd24iPhrdSa_BRMznJaomzANVcpM4d0o_LWXRpa_VmoJEz4VzFlhOrxu1kZIqaPtXhSswrNRHpSd92Z05zbwmig0jZNi1yY9O3D9Duo5pp79jM8q1M3Xzkz1TJT1cVmfb_WBMFuuS9QqpIL5zEobjVnpdqaTBBkkSPjpSZi_lg"
+#endif
 
 using namespace ::chip;
 using namespace ::chip::Shell;
@@ -128,9 +134,9 @@ static void InitServer(intptr_t context)
     SetupPretendDevices();
 #endif
 }
-
 extern "C" void app_main()
 {
+
     // Initialize the ESP NVS layer.
     esp_err_t err = nvs_flash_init();
     if (err != ESP_OK)
@@ -144,9 +150,22 @@ extern "C" void app_main()
         ESP_LOGE(TAG, "esp_event_loop_create_default() failed: %s", esp_err_to_name(err));
         return;
     }
+
 #if CONFIG_ENABLE_PW_RPC
     chip::rpc::Init();
 #endif
+
+    esp_insights_config_t config = {
+        .log_type = ESP_DIAG_LOG_TYPE_ERROR | ESP_DIAG_LOG_TYPE_WARNING | ESP_DIAG_LOG_TYPE_EVENT,
+#ifdef CONFIG_ESP_INSIGHTS_TRANSPORT_HTTPS
+        .auth_key = ESP_INSIGHTS_AUTH_KEY,
+#endif
+    };
+    esp_err_t ret = esp_insights_init(&config);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize ESP Insights, err:0x%x", ret);
+    }
+
 
     ESP_LOGI(TAG, "==================================================");
     ESP_LOGI(TAG, "chip-esp32-all-cluster-demo starting");
