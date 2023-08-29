@@ -21,17 +21,42 @@
 #error "Tracing macros seem to be double defined"
 #endif
 
+#include "counter.h"
 namespace Insights {
+
+static unsigned int hash(const char *str) {
+        unsigned int hash = 5381;
+        int c;
+        while ((c = *str++)) {
+            hash = ((hash << 5) + hash) + c;
+        }
+        return hash;
+}
+
 class ESP32Backend
 {
 public:
     ESP32Backend(const char * str, ...);
     ~ESP32Backend();
+    static constexpr int BLACKLIST_SIZE = 5;
+    static unsigned int blacklistHashes[BLACKLIST_SIZE];
+
+    bool isBlacklisted(const char *input) {
+       unsigned int inputHash = hash(input);
+
+       for (int i = 0; i < BLACKLIST_SIZE; i++) {
+          if (inputHash == blacklistHashes[i]) {
+               return true;
+           }
+        }
+        return false;
+    }
 
 private:
     const char * mlabel;
     const char * mgroup;
 };
+
 } // namespace Insights
 
 #define MATTER_TRACE_SCOPE(...)                                                                                                    \
@@ -47,4 +72,4 @@ private:
 
 #define MATTER_TRACE_BEGIN(...) _MATTER_TRACE_DISABLE(__VA_ARGS__)
 #define MATTER_TRACE_END(...) _MATTER_TRACE_DISABLE(__VA_ARGS__)
-#define MATTER_TRACE_INSTANT(...) _MATTER_TRACE_DISABLE(__VA_ARGS__)
+#define MATTER_TRACE_INSTANT(label, group) Insights::InstantObject::getInstance(label, group)->traceInstant()

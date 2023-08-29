@@ -21,7 +21,15 @@ config("tracing") {
 }
 
 source_set("esp32_trace") {
-  public = [ "include/matter/tracing/macros_impl.h" ]
-  sources = [ "include/matter/tracing/macros_impl.cpp" ]
+  public = [ "include/matter/tracing/macros_impl.h",
+             "include/matter/tracing/helper.h",
+             "include/matter/tracing/system_stats.h",
+             "include/matter/tracing/ESP32Counter.h",
+             "include/matter/tracing/counter.h" ]
+  public_deps = ["${chip_root}/src/lib/support",
+                 "${chip_root}/src/system",
+                 "${chip_root}/src/lib/core"]
+  sources = [ "include/matter/tracing/macros_impl.cpp",
+              "include/matter/tracing/counter.cpp" ]
   public_configs = [ ":tracing" ]
 }

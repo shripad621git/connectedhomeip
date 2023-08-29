@@ -15,8 +15,10 @@
  */
 
 #include "macros_impl.h"
+#include "helper.h"
 #include <esp_heap_caps.h>
 #include <esp_insights.h>
+
 namespace Insights {
 
 #define LOG_HEAP_INFO(label, group, entry_exit)                                                                                    \
@@ -28,17 +30,30 @@ namespace Insights {
                        heap_caps_get_free_size(MALLOC_CAP_8BIT));                                                                  \
     } while (0)
 
+unsigned int ESP32Backend::blacklistHashes[BLACKLIST_SIZE] = {
+    hash("PacketParser"),
+    hash("MinMdnsResolver"),
+    hash("SessionManager"),
+    hash("DeviceCommissioner"),
+    hash("NetworkCommissioning")
+};
+
 ESP32Backend::ESP32Backend(const char * str, ...)
 {
     va_list args;
     va_start(args, str);
     mlabel = str;
     mgroup = va_arg(args, const char *);
-    LOG_HEAP_INFO(mlabel, mgroup, "Entry");
+    if (!isBlacklisted(mgroup)) {
+        LOG_HEAP_INFO(mlabel, mgroup, "Entry");
+    }
 }
 
 ESP32Backend::~ESP32Backend()
 {
-    LOG_HEAP_INFO(mlabel, mgroup, "Exit");
+    if (!isBlacklisted(mgroup)) {
+        LOG_HEAP_INFO(mlabel, mgroup, "Exit");
+    } 
 }
+
 } // namespace Insights

@@ -61,6 +61,7 @@
 
 #if CONFIG_ENABLE_ESP_INSIGHTS_TRACE
 #include <esp_insights.h>
+#include <matter/tracing/system_stats.h>
 #endif
 
 using namespace ::chip;
@@ -77,6 +78,7 @@ static const char * TAG = "light-app";
 
 static AppDeviceCallbacks EchoCallbacks;
 static AppDeviceCallbacksDelegate sAppDeviceCallbacksDelegate;
+
 
 namespace {
 #if CONFIG_ENABLE_ESP32_FACTORY_DATA_PROVIDER
@@ -113,6 +115,12 @@ static void InitServer(intptr_t context)
 
     DeviceCallbacksDelegate::Instance().SetAppDelegate(&sAppDeviceCallbacksDelegate);
     Esp32AppServer::Init(); // Init ZCL Data Model and CHIP App Server AND Initialize device attestation config
+}
+
+static void InitTimer(intptr_t context)
+{
+     register_system_metrics();
+     fetch_system_metrics();
 }
 
 extern "C" void app_main()
@@ -184,6 +192,7 @@ extern "C" void app_main()
     ESPOpenThreadInit();
 
     chip::DeviceLayer::PlatformMgr().ScheduleWork(InitServer, reinterpret_cast<intptr_t>(nullptr));
+    chip::DeviceLayer::PlatformMgr().ScheduleWork(InitTimer, reinterpret_cast<intptr_t>(nullptr));
 
     error = GetAppTask().StartAppTask();
     if (error != CHIP_NO_ERROR)

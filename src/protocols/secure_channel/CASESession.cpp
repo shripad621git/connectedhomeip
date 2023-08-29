@@ -46,9 +46,15 @@
 #include <system/SystemClock.h>
 #include <system/TLVPacketBufferBackingStore.h>
 #include <tracing/macros.h>
+#include <matter/tracing/ESP32Counter.h>
 #include <transport/SessionManager.h>
 
 namespace {
+
+chip::AdvanceCounter<int> sigma1("sigma1cnt","CASE");
+chip::AdvanceCounter<int>sigma2cnt("sigma2cnt","CASE");
+chip::AdvanceCounter<int> sigma3cnt("sigma3cnt","CASE");
+chip::AdvanceCounter<int> casefailcount("casefailcount","CASE");
 
 enum
 {
@@ -547,6 +553,11 @@ void CASESession::OnResponseTimeout(ExchangeContext * ec)
     VerifyOrReturn(mExchangeCtxt == ec, ChipLogError(SecureChannel, "CASESession::OnResponseTimeout exchange doesn't match"));
     ChipLogError(SecureChannel, "CASESession timed out while waiting for a response from the peer. Current state was %u",
                  to_underlying(mState));
+
+    casefailcount.Advance();
+    printf("CASE fail count %d",casefailcount.GetValue());
+    MATTER_TRACE_INSTANT("casefailcnt","CASE");
+
     // Discard the exchange so that Clear() doesn't try aborting it.  The
     // exchange will handle that.
     DiscardExchange();
@@ -747,6 +758,10 @@ CHIP_ERROR CASESession::SendSigma1()
 CHIP_ERROR CASESession::HandleSigma1_and_SendSigma2(System::PacketBufferHandle && msg)
 {
     MATTER_TRACE_SCOPE("HandleSigma1_and_SendSigma2", "CASESession");
+
+    MATTER_TRACE_INSTANT("sigma1","CASE");
+    sigma1.Advance();
+    printf("Sigma1cnt %d ",sigma1.GetValue());
     ReturnErrorOnFailure(HandleSigma1(std::move(msg)));
 
     return CHIP_NO_ERROR;
@@ -971,6 +986,9 @@ CHIP_ERROR CASESession::SendSigma2Resume()
 CHIP_ERROR CASESession::SendSigma2()
 {
     MATTER_TRACE_SCOPE("SendSigma2", "CASESession");
+    CHIP_ERROR err1 = sigma2cnt.Advance();
+    printf("Sigma 2 cnt %d",sigma2cnt.GetValue());
+    MATTER_TRACE_INSTANT("sigma2cnt","CASE");
 
     VerifyOrReturnError(GetLocalSessionId().HasValue(), CHIP_ERROR_INCORRECT_STATE);
     VerifyOrReturnError(mFabricsTable != nullptr, CHIP_ERROR_INCORRECT_STATE);
@@ -1568,6 +1586,9 @@ exit:
 CHIP_ERROR CASESession::HandleSigma3a(System::PacketBufferHandle && msg)
 {
     MATTER_TRACE_SCOPE("HandleSigma3", "CASESession");
+    CHIP_ERROR err1 = sigma3cnt.Advance();
+    printf("Sigma 3 cnt %d",sigma3cnt.GetValue());
+    MATTER_TRACE_INSTANT("sigma3cnt","CASE");
     CHIP_ERROR err = CHIP_NO_ERROR;
     System::PacketBufferTLVReader tlvReader;
     TLV::TLVReader decryptedDataTlvReader;

@@ -39,6 +39,7 @@
 #include <lib/support/CodeUtils.h>
 #include <lib/support/SafeInt.h>
 #include <lib/support/TypeTraits.h>
+#include <lib/support/CHIPCounter.h>
 #include <protocols/Protocols.h>
 #include <protocols/secure_channel/Constants.h>
 #include <protocols/secure_channel/StatusReport.h>
@@ -521,6 +522,7 @@ CHIP_ERROR PASESession::HandlePBKDFParamResponse(System::PacketBufferHandle && m
     SuccessOrExit(err);
 
     err = SendMsg1();
+
     SuccessOrExit(err);
 
 exit:
@@ -620,6 +622,7 @@ CHIP_ERROR PASESession::HandleMsg1_and_SendMsg2(System::PacketBufferHandle && ms
         err = mExchangeCtxt->SendMessage(MsgType::PASE_Pake2, std::move(msg2), SendFlags(SendMessageFlags::kExpectResponse));
         SuccessOrExit(err);
 
+        MATTER_TRACE_INSTANT("pake2cnt","PASE");
         mNextExpectedMsg.SetValue(MsgType::PASE_Pake3);
     }
 
@@ -714,6 +717,8 @@ CHIP_ERROR PASESession::HandleMsg3(System::PacketBufferHandle && msg)
 {
     MATTER_TRACE_SCOPE("HandleMsg3", "PASESession");
     CHIP_ERROR err = CHIP_NO_ERROR;
+
+    MATTER_TRACE_INSTANT("pake3cnt","PASE");
 
     ChipLogDetail(SecureChannel, "Received spake2p msg3");
 
