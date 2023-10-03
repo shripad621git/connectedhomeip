@@ -17,6 +17,8 @@
 #include "macros_impl.h"
 #include <esp_heap_caps.h>
 #include <esp_insights.h>
+
+
 namespace Insights {
 
 #define LOG_HEAP_INFO(label, group, entry_exit)                                                                                    \
@@ -38,7 +40,7 @@ ESP32Backend::ESP32Backend(const char * str, ...)
 }
 
 ESP32Backend::~ESP32Backend()
-{
-    LOG_HEAP_INFO(mlabel, mgroup, "Exit");
+{   
+    LOG_HEAP_INFO(mlabel, mgroup, "Exit");   
 }
 } // namespace Insights

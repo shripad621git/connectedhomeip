@@ -21,6 +21,9 @@
 #error "Tracing macros seem to be double defined"
 #endif
 
+#include "counter.h"
+
+
 namespace Insights {
 class ESP32Backend
 {
@@ -48,3 +51,8 @@ private:
 #define MATTER_TRACE_BEGIN(...) _MATTER_TRACE_DISABLE(__VA_ARGS__)
 #define MATTER_TRACE_END(...) _MATTER_TRACE_DISABLE(__VA_ARGS__)
 #define MATTER_TRACE_INSTANT(...) _MATTER_TRACE_DISABLE(__VA_ARGS__)
+
+#ifdef CONFIG_ENABLE_ESP_INSIGHTS_COUNTERS
+#undef CHIP_GENERIC_COUNTER
+#define CHIP_GENERIC_COUNTER(label, group) Insights::InstantObject::getInstance(label, group)->traceInstant()
+#endif

@@ -119,4 +119,9 @@ protected:
     T mCounterValue;
 };
 
+#define CHIP_GENERIC_COUNTER(label, group)                                                                                         \
+    do                                                                                                                             \
+    {                                                                                                                              \
+    } while (false)
+
 } // namespace chip

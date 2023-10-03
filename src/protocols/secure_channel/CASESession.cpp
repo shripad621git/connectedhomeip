@@ -37,6 +37,8 @@
 #include <lib/support/SafeInt.h>
 #include <lib/support/ScopedBuffer.h>
 #include <lib/support/TypeTraits.h>
+#include <lib/support/LabeledCounter.h>
+#include <lib/support/CHIPCounter.h>
 #include <platform/PlatformManager.h>
 #include <protocols/Protocols.h>
 #include <protocols/secure_channel/CASEDestinationId.h>
@@ -49,6 +51,9 @@
 #include <transport/SessionManager.h>
 
 namespace {
+
+chip::AdvanceCounter<int> sigma1cnt("sigma1cnt","CASE");
+chip::AdvanceCounter<int> sigma2cnt("sigma2cnt","CASE");
 
 enum
 {
@@ -747,6 +752,9 @@ CHIP_ERROR CASESession::SendSigma1()
 CHIP_ERROR CASESession::HandleSigma1_and_SendSigma2(System::PacketBufferHandle && msg)
 {
     MATTER_TRACE_SCOPE("HandleSigma1_and_SendSigma2", "CASESession");
+    sigma1cnt.Advance();
+    printf("Sigma1 cnt %d",sigma1cnt.GetValue());
+    CHIP_GENERIC_COUNTER("sigma1cnt","CASE");
     ReturnErrorOnFailure(HandleSigma1(std::move(msg)));
 
     return CHIP_NO_ERROR;
@@ -971,6 +979,8 @@ CHIP_ERROR CASESession::SendSigma2Resume()
 CHIP_ERROR CASESession::SendSigma2()
 {
     MATTER_TRACE_SCOPE("SendSigma2", "CASESession");
+    sigma2cnt.Advance();
+    printf("Sigma2 cnt %d",sigma2cnt.GetValue());
 
     VerifyOrReturnError(GetLocalSessionId().HasValue(), CHIP_ERROR_INCORRECT_STATE);
     VerifyOrReturnError(mFabricsTable != nullptr, CHIP_ERROR_INCORRECT_STATE);
