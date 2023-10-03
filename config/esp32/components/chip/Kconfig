@@ -849,6 +849,11 @@ menu "CHIP Device Layer"
                ESP Insights is a remote diagnostics solution to monitor the health of ESP devices in the field.
                Enabling the above option will enable the esp32 specific tracing functionality and report the
                diagnostic information to the insights cloud.
+       
+       config ENABLE_ESP_INSIGHTS_COUNTERS
+           bool "Enable Counters"
+           depends on ESP_INSIGHTS_ENABLED
+           default y
 
     endmenu
 

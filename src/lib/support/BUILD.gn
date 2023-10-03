@@ -113,6 +113,7 @@ static_library("support") {
     "IniEscaping.cpp",
     "IniEscaping.h",
     "Iterators.h",
+    "LabeledCounter.h",
     "LifetimePersistedCounter.h",
     "ObjectLifeCycle.h",
     "PersistedCounter.h",
@@ -177,6 +178,7 @@ static_library("support") {
     "${nlio_root}:nlio",
   ]
 
+  
   # These are needed because we include CHIPCore.h, which uses config
   # options for src/ble and src/inet, however we cannot depend on those
   # directly as such a dependency is cyclic.
