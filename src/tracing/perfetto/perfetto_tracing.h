@@ -38,6 +38,7 @@ public:
     // as they would be slower than expected. Perfetto trace macros
     // are expected to be set exclusively (via matter_trace_config)
 
+    void TraceCounter(const char * label, const char * group) override;
     void LogMessageSend(MessageSendInfo &) override;
     void LogMessageReceived(MessageReceivedInfo &) override;
 

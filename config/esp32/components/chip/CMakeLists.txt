@@ -260,6 +260,9 @@ endif()
 if (CONFIG_ENABLE_ESP_INSIGHTS_TRACE)
   chip_gn_arg_bool("matter_enable_tracing_support"  "true")
   chip_gn_arg_append("matter_trace_config" "\"${CHIP_ROOT}/src/tracing/esp32_trace:esp32_trace_tracing\"")
+else()
+  chip_gn_arg_bool("matter_enable_tracing_support"  "true")
+  chip_gn_arg_append("matter_trace_config" "\"${CHIP_ROOT}/src/tracing/none\"")
 endif()
 
 if (CONFIG_ENABLE_ESP_INSIGHTS_SYSTEM_STATS)
@@ -272,6 +275,8 @@ endif()
 
 if (CONFIG_ENABLE_ESP_INSIGHTS_TRACE)
    target_include_directories(${COMPONENT_LIB} INTERFACE "${CHIP_ROOT}/src/tracing/esp32_trace/include")
+else()
+   target_include_directories(${COMPONENT_LIB} INTERFACE "${CHIP_ROOT}/src/tracing/none/include")
 endif()
 
 if (CONFIG_ENABLE_MATTER_EVENT_LIST)
