@@ -52,7 +52,25 @@ void PerfettoBackend::LogMessageReceived(MessageReceivedInfo & info)
     );
 }
 
-void PerfettoBackend::TraceCounter(const char * label, const char * group) {}
+void PerfettoBackend::TraceCounter(const char * label, const char * group)
+{
+    std::string counterId = std::string(label);
+
+    if (counters.find(counterId) == counters.end())
+    {
+        counters[counterId] = 1;
+    }
+    else
+    {
+        counters[counterId]++;
+    }
+
+    TRACE_EVENT_INSTANT("Matter", "Counter",                           //
+                        "Label", label,                                //
+                        "count", static_cast<int>(counters[counterId]) //
+    );
+}
+
 void PerfettoBackend::LogMessageSend(MessageSendInfo & info)
 {
     const char * messageType = "UNKNOWN";

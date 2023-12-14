@@ -23,6 +23,7 @@
 #endif
 
 #include <perfetto.h>
+#include <tracing/registry.h>
 
 PERFETTO_DEFINE_CATEGORIES(perfetto::Category("Matter").SetDescription("Matter trace events"));
 
@@ -30,7 +31,4 @@ PERFETTO_DEFINE_CATEGORIES(perfetto::Category("Matter").SetDescription("Matter t
 #define MATTER_TRACE_END(label, group) TRACE_EVENT_END("Matter")
 #define MATTER_TRACE_INSTANT(label, group) TRACE_EVENT_INSTANT("Matter", label, "class_name", group)
 #define MATTER_TRACE_SCOPE(label, group) TRACE_EVENT("Matter", label, "class_name", group)
-#define MATTER_TRACE_COUNTER(label, group)                                                                                         \
-    do                                                                                                                             \
-    {                                                                                                                              \
-    } while (false)
+#define MATTER_TRACE_COUNTER(label, group) ::chip::Tracing::Internal::Counter(label, group)

@@ -17,7 +17,9 @@
  */
 #pragma once
 
+#include <atomic>
 #include <tracing/backend.h>
+#include <unordered_map>
 
 #include <memory>
 #include <perfetto.h>
@@ -45,6 +47,9 @@ public:
     void LogNodeLookup(NodeLookupInfo &) override;
     void LogNodeDiscovered(NodeDiscoveredInfo &) override;
     void LogNodeDiscoveryFailed(NodeDiscoveryFailedInfo &) override;
+
+private:
+    std::unordered_map<std::string, std::atomic<int>> counters;
 };
 
 } // namespace Perfetto
