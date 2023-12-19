@@ -26,7 +26,6 @@
 //    MATTER_TRACE_END(label, group)
 //    MATTER_TRACE_INSTANT(label, group)
 //    MATTER_TRACE_SCOPE(label, group)
-//    MATTER_TRACE_COUNTER(label, group)
 #include <matter/tracing/macros_impl.h>
 #include <tracing/log_declares.h>
 #include <tracing/registry.h>
@@ -66,6 +65,12 @@
     {                                                                                                                              \
         ::chip::Tracing::NodeDiscoveryFailedInfo _trace_data{ __VA_ARGS__ };                                                       \
         ::chip::Tracing::Internal::LogNodeDiscoveryFailed(_trace_data);                                                            \
+    } while (false)
+
+#define MATTER_TRACE_COUNTER(label, group)                                                                                         \
+    do                                                                                                                             \
+    {                                                                                                                              \
+        ::chip::Tracing::Internal::Counter(label, group);                                                                          \
     } while (false)
 
 #else // MATTER_TRACING_ENABLED

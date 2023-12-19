@@ -546,7 +546,7 @@ void CASESession::OnResponseTimeout(ExchangeContext * ec)
 {
     VerifyOrReturn(ec != nullptr, ChipLogError(SecureChannel, "CASESession::OnResponseTimeout was called by null exchange"));
     VerifyOrReturn(mExchangeCtxt == ec, ChipLogError(SecureChannel, "CASESession::OnResponseTimeout exchange doesn't match"));
-    MATTER_TRACE_COUNTER("casetimeout","CASE");
+    MATTER_TRACE_COUNTER("casetimeout", "CASESession");
     ChipLogError(SecureChannel, "CASESession timed out while waiting for a response from the peer. Current state was %u",
                  to_underlying(mState));
     // Discard the exchange so that Clear() doesn't try aborting it.  The
@@ -745,7 +745,7 @@ CHIP_ERROR CASESession::SendSigma1()
 CHIP_ERROR CASESession::HandleSigma1_and_SendSigma2(System::PacketBufferHandle && msg)
 {
     MATTER_TRACE_SCOPE("HandleSigma1_and_SendSigma2", "CASESession");
-    MATTER_TRACE_COUNTER("sigma1cnt", "CASE");
+    MATTER_TRACE_COUNTER("sigma1cnt", "CASESession");
 
     ReturnErrorOnFailure(HandleSigma1(std::move(msg)));
 
@@ -966,7 +966,7 @@ CHIP_ERROR CASESession::SendSigma2Resume()
 CHIP_ERROR CASESession::SendSigma2()
 {
     MATTER_TRACE_SCOPE("SendSigma2", "CASESession");
-    MATTER_TRACE_COUNTER("sigma2cnt","CASE");
+    MATTER_TRACE_COUNTER("sigma2cnt", "CASESession");
 
     VerifyOrReturnError(GetLocalSessionId().HasValue(), CHIP_ERROR_INCORRECT_STATE);
     VerifyOrReturnError(mFabricsTable != nullptr, CHIP_ERROR_INCORRECT_STATE);
@@ -1562,7 +1562,7 @@ exit:
 CHIP_ERROR CASESession::HandleSigma3a(System::PacketBufferHandle && msg)
 {
     MATTER_TRACE_SCOPE("HandleSigma3", "CASESession");
-    MATTER_TRACE_COUNTER("sigma3cnt","CASE");
+    MATTER_TRACE_COUNTER("sigma3cnt", "CASESession");
     CHIP_ERROR err = CHIP_NO_ERROR;
     System::PacketBufferTLVReader tlvReader;
     TLV::TLVReader decryptedDataTlvReader;

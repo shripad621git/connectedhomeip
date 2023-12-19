@@ -49,7 +49,7 @@ public:
     void LogNodeDiscoveryFailed(NodeDiscoveryFailedInfo &) override;
 
 private:
-    std::unordered_map<std::string, std::atomic<int>> counters;
+    std::unordered_map<std::string, int> counters;
 };
 
 } // namespace Perfetto

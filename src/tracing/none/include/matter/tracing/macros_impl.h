@@ -31,7 +31,3 @@
 #define MATTER_TRACE_END(...) _MATTER_TRACE_DISABLE(__VA_ARGS__)
 #define MATTER_TRACE_INSTANT(...) _MATTER_TRACE_DISABLE(__VA_ARGS__)
 #define MATTER_TRACE_SCOPE(...) _MATTER_TRACE_DISABLE(__VA_ARGS__)
-#define MATTER_TRACE_COUNTER(label, group)                                                                                         \
-    do                                                                                                                             \
-    {                                                                                                                              \
-    } while (false)

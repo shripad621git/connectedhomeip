@@ -21,10 +21,10 @@
 #include <lib/address_resolve/TracingStructs.h>
 #include <lib/core/ErrorStr.h>
 #include <lib/support/StringBuilder.h>
-#include <transport/TracingStructs.h>
-
+#include <lib/support/logging/TextOnlyLogging.h>
 #include <matter/tracing/macros_impl.h>
 #include <perfetto.h>
+#include <transport/TracingStructs.h>
 
 namespace chip {
 namespace Tracing {
@@ -55,7 +55,7 @@ void PerfettoBackend::LogMessageReceived(MessageReceivedInfo & info)
 void PerfettoBackend::TraceCounter(const char * label, const char * group)
 {
     std::string counterId = std::string(label);
-
+    ChipLogProgress(SecureChannel, "In trace counter");
     if (counters.find(counterId) == counters.end())
     {
         counters[counterId] = 1;
@@ -65,14 +65,15 @@ void PerfettoBackend::TraceCounter(const char * label, const char * group)
         counters[counterId]++;
     }
 
-    TRACE_EVENT_INSTANT("Matter", "Counter",                           //
-                        "Label", label,                                //
-                        "count", static_cast<int>(counters[counterId]) //
+    TRACE_EVENT("Matter", "Counter",         //
+                "Label", label,              //
+                "count", counters[counterId] //
     );
 }
 
 void PerfettoBackend::LogMessageSend(MessageSendInfo & info)
 {
+    ChipLogProgress(SecureChannel, "In trace counter");
     const char * messageType = "UNKNOWN";
     switch (info.messageType)
     {
