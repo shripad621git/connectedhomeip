@@ -56,18 +56,18 @@ void PerfettoBackend::TraceCounter(const char * label, const char * group)
 {
     std::string counterId = std::string(label);
     ChipLogProgress(SecureChannel, "In trace counter");
-    if (counters.find(counterId) == counters.end())
+    if (mCounters.find(counterId) == mCounters.end())
     {
-        counters[counterId] = 1;
+        mCounters[counterId] = 1;
     }
     else
     {
-        counters[counterId]++;
+        mCounters[counterId]++;
     }
 
     TRACE_EVENT("Matter", "Counter",         //
                 "Label", label,              //
-                "count", counters[counterId] //
+                "count", mCounters[counterId] //
     );
 }
 
