@@ -89,6 +89,7 @@ void PASESession::Finish()
 
 void PASESession::Clear()
 {
+    MATTER_TRACE_SCOPE("Clear", "PASESession");
     // This function zeroes out and resets the memory used by the object.
     // It's done so that no security related information will be leaked.
     memset(&mPASEVerifier, 0, sizeof(mPASEVerifier));
@@ -112,6 +113,7 @@ void PASESession::Clear()
 
 CHIP_ERROR PASESession::Init(SessionManager & sessionManager, uint32_t setupCode, SessionEstablishmentDelegate * delegate)
 {
+    MATTER_TRACE_SCOPE("Init", "PASESession");
     VerifyOrReturnError(sessionManager.GetSessionKeystore() != nullptr, CHIP_ERROR_INVALID_ARGUMENT);
     VerifyOrReturnError(delegate != nullptr, CHIP_ERROR_INVALID_ARGUMENT);
 
@@ -242,12 +244,14 @@ exit:
 
 void PASESession::OnResponseTimeout(ExchangeContext * ec)
 {
+    MATTER_TRACE_SCOPE("OnResponseTimeout", "PASESession");
     VerifyOrReturn(ec != nullptr, ChipLogError(SecureChannel, "PASESession::OnResponseTimeout was called by null exchange"));
     VerifyOrReturn(mExchangeCtxt == nullptr || mExchangeCtxt == ec,
                    ChipLogError(SecureChannel, "PASESession::OnResponseTimeout exchange doesn't match"));
     // If we were waiting for something, mNextExpectedMsg had better have a value.
     ChipLogError(SecureChannel, "PASESession timed out while waiting for a response from the peer. Expected message type was %u",
                  to_underlying(mNextExpectedMsg.Value()));
+    MATTER_TRACE_COUNTER("PASEtimeout", "PASESession");
     // Discard the exchange so that Clear() doesn't try closing it.  The
     // exchange will handle that.
     DiscardExchange();
@@ -551,6 +555,7 @@ CHIP_ERROR PASESession::SendMsg1()
     ReturnErrorOnFailure(
         mExchangeCtxt->SendMessage(MsgType::PASE_Pake1, std::move(msg), SendFlags(SendMessageFlags::kExpectResponse)));
     ChipLogDetail(SecureChannel, "Sent spake2p msg1");
+    MATTER_TRACE_COUNTER("Pake1Count", "PASESession");
 
     mNextExpectedMsg.SetValue(MsgType::PASE_Pake2);
 
@@ -569,6 +574,7 @@ CHIP_ERROR PASESession::HandleMsg1_and_SendMsg2(System::PacketBufferHandle && ms
     size_t verifier_len = kMAX_Hash_Length;
 
     ChipLogDetail(SecureChannel, "Received spake2p msg1");
+    MATTER_TRACE_COUNTER("Spake1Count", "PASESession");
 
     System::PacketBufferTLVReader tlvReader;
     TLV::TLVType containerType = TLV::kTLVType_Structure;
@@ -617,7 +623,7 @@ CHIP_ERROR PASESession::HandleMsg1_and_SendMsg2(System::PacketBufferHandle && ms
     }
 
     ChipLogDetail(SecureChannel, "Sent spake2p msg2");
-
+    MATTER_TRACE_COUNTER("Spake2Count", "PASESession");
 exit:
 
     if (err != CHIP_NO_ERROR)
@@ -638,6 +644,7 @@ CHIP_ERROR PASESession::HandleMsg2_and_SendMsg3(System::PacketBufferHandle && ms
     System::PacketBufferHandle resp;
 
     ChipLogDetail(SecureChannel, "Received spake2p msg2");
+    MATTER_TRACE_COUNTER("Pake2Count", "PASESession");
 
     System::PacketBufferTLVReader tlvReader;
     TLV::TLVType containerType = TLV::kTLVType_Structure;
@@ -691,8 +698,8 @@ CHIP_ERROR PASESession::HandleMsg2_and_SendMsg3(System::PacketBufferHandle && ms
 
         mNextExpectedMsg.SetValue(MsgType::StatusReport);
     }
-
     ChipLogDetail(SecureChannel, "Sent spake2p msg3");
+    MATTER_TRACE_COUNTER("Spake3count", "PASESession");
 
 exit:
 
@@ -709,6 +716,7 @@ CHIP_ERROR PASESession::HandleMsg3(System::PacketBufferHandle && msg)
     CHIP_ERROR err = CHIP_NO_ERROR;
 
     ChipLogDetail(SecureChannel, "Received spake2p msg3");
+    MATTER_TRACE_COUNTER("Pake3Count", "PASESession");
 
     mNextExpectedMsg.ClearValue();
 
@@ -814,6 +822,7 @@ CHIP_ERROR PASESession::OnUnsolicitedMessageReceived(const PayloadHeader & paylo
 CHIP_ERROR PASESession::OnMessageReceived(ExchangeContext * exchange, const PayloadHeader & payloadHeader,
                                           System::PacketBufferHandle && msg)
 {
+    MATTER_TRACE_SCOPE("OnMessageReceived", "PASESession");
     CHIP_ERROR err  = ValidateReceivedMessage(exchange, payloadHeader, msg);
     MsgType msgType = static_cast<MsgType>(payloadHeader.GetMessageType());
     SuccessOrExit(err);
