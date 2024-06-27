@@ -31,7 +31,11 @@ namespace Clusters {
 class PowerSourceServer
 {
 public:
-    static PowerSourceServer & Instance();
+    static PowerSourceServer & Instance()
+    {
+        PowerSourceServer gPowerSourceServer;
+        return gPowerSourceServer;
+    }
 
     // Caller does not need to retain the span past the call point as these are copied into an internal storage
     CHIP_ERROR SetEndpointList(EndpointId powerSourceClusterEndpoint, Span<EndpointId> endpointList);
@@ -54,7 +58,11 @@ public:
     CHIP_ERROR Read(const ConcreteReadAttributePath & aPath, AttributeValueEncoder & aEncoder) override;
 };
 
-PowerSourceAttrAccess & TestOnlyGetPowerSourceAttrAccess();
+PowerSourceAttrAccess & TestOnlyGetPowerSourceAttrAccess()
+{
+    static PowerSourceAttrAccess gAttrAccess;
+    return gAttrAccess;
+}
 
 } // namespace Clusters
 } // namespace app

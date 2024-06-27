@@ -107,7 +107,11 @@ class DoorLockServer : public chip::app::AttributeAccessInterface
 {
 public:
     DoorLockServer() : AttributeAccessInterface(chip::Optional<chip::EndpointId>::Missing(), chip::app::Clusters::DoorLock::Id) {}
-    static DoorLockServer & Instance();
+    static DoorLockServer & Instance()
+    {
+        static DoorLockServer instance;
+        return instance;
+    }
 
     using Feature                       = chip::app::Clusters::DoorLock::Feature;
     using OnFabricRemovedCustomCallback = void (*)(chip::EndpointId endpointId, chip::FabricIndex fabricIndex);

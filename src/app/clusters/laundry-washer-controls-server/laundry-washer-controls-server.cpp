@@ -60,8 +60,6 @@ Delegate * GetDelegate(EndpointId endpoint)
 
 } // namespace
 
-LaundryWasherControlsServer LaundryWasherControlsServer::sInstance;
-
 /**********************************************************
  * LaundryWasherControlsServer public methods
  *********************************************************/
@@ -74,11 +72,6 @@ void LaundryWasherControlsServer::SetDefaultDelegate(EndpointId endpoint, Delega
     {
         gDelegateTable[ep] = delegate;
     }
-}
-
-LaundryWasherControlsServer & LaundryWasherControlsServer::Instance()
-{
-    return sInstance;
 }
 
 Status LaundryWasherControlsServer::SetSpinSpeedCurrent(EndpointId endpointId, DataModel::Nullable<uint8_t> spinSpeedCurrent)

@@ -67,10 +67,6 @@ struct PowerSourceClusterInfo
     Span<EndpointId> mEndpointList;
 };
 
-PowerSourceServer gPowerSourceServer;
-
-PowerSourceAttrAccess gAttrAccess;
-
 #ifdef ZCL_USING_POWER_SOURCE_CLUSTER_SERVER
 static constexpr uint16_t kNumStaticEndpoints = MATTER_DM_POWER_SOURCE_CLUSTER_SERVER_ENDPOINT_COUNT;
 #define POWER_SERVER_NUM_SUPPORTED_ENDPOINTS                                                                                       \
@@ -91,7 +87,8 @@ PowerSourceClusterInfo * sPowerSourceClusterInfo = nullptr;
 
 void MatterPowerSourcePluginServerInitCallback()
 {
-    registerAttributeAccessOverride(&gAttrAccess);
+    PowerSourceAttrAccess & attrAccess = TestOnlyGetPowerSourceAttrAccess();
+    registerAttributeAccessOverride(&attrAccess);
 }
 
 namespace chip {
@@ -132,16 +129,6 @@ CHIP_ERROR PowerSourceAttrAccess::Read(const ConcreteReadAttributePath & aPath, 
     }
 
     return err;
-}
-
-PowerSourceAttrAccess & TestOnlyGetPowerSourceAttrAccess()
-{
-    return gAttrAccess;
-}
-
-PowerSourceServer & PowerSourceServer::Instance()
-{
-    return gPowerSourceServer;
 }
 
 // Caller does not need to retain the span past the call point as these are copied into an internal storage
