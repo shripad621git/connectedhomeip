@@ -74,6 +74,9 @@
 #define CHIP_ADV_DATA_TYPE_FLAGS 0x01
 #define CHIP_ADV_DATA_FLAGS 0x06
 #define CHIP_ADV_DATA_TYPE_SERVICE_DATA 0x16
+#define MAX_ADV_RETRIES 3
+
+int advRetryCount = 0;
 
 using namespace ::chip;
 using namespace ::chip::Ble;
@@ -1738,11 +1741,27 @@ CHIP_ERROR BLEManagerImpl::StartAdvertising(void)
         err = MapBLEError(ble_gap_adv_start(own_addr_type, NULL, BLE_HS_FOREVER, &adv_params, ble_svr_gap_event, NULL));
         if (err == CHIP_NO_ERROR)
         {
+            advRetryCount =0 ;
             return CHIP_NO_ERROR;
         }
         else
         {
             ChipLogError(DeviceLayer, "ble_gap_adv_start() failed: %s", ErrorStr(err));
+            while (advRetryCount < MAX_ADV_RETRIES)
+            {
+                advRetryCount++;
+                ChipLogProgress(DeviceLayer, "Retrying advertising in %d ms (Attempt %d/%d)", 1, advRetryCount, MAX_ADV_RETRIES);
+                err =  MapBLEError(ble_gap_adv_start(own_addr_type, NULL, BLE_HS_FOREVER, &adv_params, ble_svr_gap_event, NULL));
+                printf("Error %s", ErrorStr(err));
+                if (err == CHIP_NO_ERROR)
+                {
+                    return CHIP_NO_ERROR;
+                }
+            }
+            if (advRetryCount == MAX_ADV_RETRIES)
+            {
+                 ChipLogError(DeviceLayer, "Max retry attempts reached, giving up on advertising.");
+            }
             return err;
         }
     }
