@@ -1,0 +1,54 @@
+#
+#    Copyright (c) 2024 Project CHIP Authors
+#
+#    Licensed under the Apache License, Version 2.0 (the "License");
+#    you may not use this file except in compliance with the License.
+#    You may obtain a copy of the License at
+#
+#        http://www.apache.org/licenses/LICENSE-2.0
+#
+#    Unless required by applicable law or agreed to in writing, software
+#    distributed under the License is distributed on an "AS IS" BASIS,
+#    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#    See the License for the specific language governing permissions and
+#    limitations under the License.
+#
+
+mainmenu "Matter ESP32-C6 Zephyr Lighting Example"
+
+# CONFIG_CHIP_WIFI is the single switch that turns this into a WiFi Matter build:
+#   * config/common/cmake/chip_gn_kconfig_defaults.cmake maps it to the GN arg
+#     chip_enable_wifi=true  -> compiles src/platform/Zephyr/wifi/* (ZephyrWifiDriver)
+#   * config/zephyr/chip-module/CMakeLists.txt maps it to chip_mdns="minimal"
+#   * src/platform/Zephyr/CHIPDevicePlatformConfig.h sets
+#     CHIP_DEVICE_CONFIG_ENABLE_WIFI=1 (selects the WiFi ConnectivityManager mixin)
+#
+# We select the ESP32-native WiFi driver and deliberately do NOT pull in Zephyr's
+# WPA supplicant (WIFI_NM_WPA_SUPPLICANT). The ESP32 supplicant lives in the
+# hal_espressif blob; WiFiManager.cpp works over plain net_mgmt when the
+# supplicant is absent. Forcing Zephyr's supplicant fails to build against the
+# blob — a hard-won lesson from the standalone bring-up.
+config CHIP_WIFI
+    bool "Matter over WiFi (ESP32-native driver)"
+    default y
+    select WIFI
+    select WIFI_ESP32
+    select NET_L2_ETHERNET
+    imply NET_IPV4
+    imply NET_DHCPV4
+    help
+      Enable Matter operation over WiFi on the ESP32-C6 using the ESP32-native
+      Zephyr WiFi driver (no WPA supplicant module).
+
+# Matter runs in WiFi station mode only (commissioner joins us to the home AP).
+config CHIP_ENABLE_WIFI_STATION
+    bool
+    default CHIP_WIFI
+
+# Use a LOCAL defaults file (not config/zephyr/chip-module/Kconfig.defaults):
+# the shared one rsources config/nxp/chip-module/Kconfig.defaults, which declares
+# classic mbedTLS 3.x symbols absent from this workspace's mbedTLS 4.1 module and
+# makes Kconfig abort with "defined without a type" warnings.
+rsource "Kconfig.defaults"
+
+source "Kconfig.zephyr"

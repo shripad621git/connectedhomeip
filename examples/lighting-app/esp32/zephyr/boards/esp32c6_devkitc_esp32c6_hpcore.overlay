@@ -1,0 +1,38 @@
+/*
+ * Copyright (c) 2024 Project CHIP Authors
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * ESP32-C6 DevKit overlay for the Matter lighting example.
+ */
+
+/ {
+	aliases {
+		/* The lighting example drives this as the On/Off light output. */
+		led0 = &light_led;
+	};
+
+	leds {
+		compatible = "gpio-leds";
+
+		/*
+		 * Plain GPIO LED on a NON-strapping pin. Strapping pins to avoid on
+		 * the C6: GPIO 4, 5, 8, 9, 15. The on-board LED is a WS2812 on GPIO8
+		 * (addressable, needs led_strip + is a strapping pin), so wire an
+		 * external LED to GPIO2 for this example, or repoint this node.
+		 */
+		light_led: led_0 {
+			gpios = <&gpio0 2 GPIO_ACTIVE_HIGH>;
+			label = "Matter light";
+		};
+	};
+};
+
+/*
+ * Correct the declared flash size to 4 MB. The esp32c6_devkitc board files
+ * declare 8 MB, but the physical DevKitM module (and many C6 kits) is 4 MB.
+ * CONFIG_FLASH_SIZE is derived from this node and fed straight to esptool; a
+ * mismatch corrupts the image header the boot ROM reads.
+ */
+&flash0 {
+	reg = <0x0 DT_SIZE_M(4)>;
+};
