@@ -45,3 +45,11 @@
 // CHIP packet-buffer pool. Default is 15 buffers (~24 KB static on the C6). A
 // single On/Off light needs far fewer; 8 is comfortable and frees ~11 KB SRAM.
 #define CHIP_SYSTEM_CONFIG_PACKETBUFFER_POOL_SIZE 8
+
+// Event-logging ring buffers. Defaults are 1024 (crit) / 512 (info) / 512 (debug)
+// = ~2 KB static. A single On/Off light emits very few events; shrink to 256 each
+// (mirrors esp-matter's optimization) to reclaim ~1.5 KB SRAM. Trade-off: fewer
+// buffered events are retained for a read-subscription to fetch. Crit must be > 0.
+#define CHIP_DEVICE_CONFIG_EVENT_LOGGING_CRIT_BUFFER_SIZE 256
+#define CHIP_DEVICE_CONFIG_EVENT_LOGGING_INFO_BUFFER_SIZE 256
+#define CHIP_DEVICE_CONFIG_EVENT_LOGGING_DEBUG_BUFFER_SIZE 256
