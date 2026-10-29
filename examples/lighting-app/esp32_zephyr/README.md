@@ -69,6 +69,8 @@ cd "$CHIP/examples/lighting-app/esp32_zephyr"
 west build -b esp32c6_devkitc/esp32c6/hpcore
 ```
 
+For ESP32-C3, use `-b esp32c3_devkitm`.
+
 -   Pristine build (after changing Kconfig or board files):
 
     ```shell
