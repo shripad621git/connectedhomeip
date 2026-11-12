@@ -5,14 +5,18 @@ running Zephyr RTOS.
 
 ## Supported Hardware
 
-| Board                            | SoC      | Transport                            |
-| -------------------------------- | -------- | ------------------------------------ |
-| `esp32c6_devkitc/esp32c6/hpcore` | ESP32-C6 | Wi-Fi (2.4 GHz) or Thread, BLE setup |
-| `esp32c3_devkitm`                | ESP32-C3 | Wi-Fi (2.4 GHz), BLE setup           |
+| Board                                         | SoC       | Transport                            |
+| --------------------------------------------- | --------- | ------------------------------------ |
+| `esp32c6_devkitc/esp32c6/hpcore`              | ESP32-C6  | Wi-Fi (2.4 GHz) or Thread, BLE setup |
+| `esp32c3_devkitm`                             | ESP32-C3  | Wi-Fi (2.4 GHz), BLE setup           |
+| `esp32s31_function_coreboard/esp32s31/hpcore` | ESP32-S31 | Wi-Fi (2.4 GHz), BLE setup           |
 
-The light output is GPIO2 on ESP32-C6 and GPIO3 on ESP32-C3 (`led0` alias in the
-board overlay). Neither DevKit has an LED on that pin (the on-board LED is a
-WS2812 on GPIO8), so connect an external LED to see the light state.
+ESP32-S31 is experimental: Zephyr v4.5.0 does not support it, see
+[ESP32-S31 (experimental)](#esp32-s31-experimental).
+
+The light output is GPIO2 on ESP32-C6 and ESP32-S31, and GPIO3 on ESP32-C3
+(`led0` alias in the board overlay). No board has an LED on that pin (the
+on-board LED is a WS2812), so connect an external LED to see the light state.
 
 ## Prerequisites
 
@@ -121,6 +125,51 @@ For ESP32-C3, use `-b esp32c3_devkitm`.
     ```shell
     west build -t menuconfig
     ```
+
+## ESP32-S31 (experimental)
+
+ESP32-S31 support is not merged in Zephyr yet. The example was built and
+commissioned over BLE-Wi-Fi on 2026-11-12 against these two draft pull requests,
+with no other patches:
+
+| Repository      | Pull request                                                         | Commit         |
+| --------------- | -------------------------------------------------------------------- | -------------- |
+| `zephyr`        | [#125547](https://github.com/zephyrproject-rtos/zephyr/pull/125547)  | `0beac8d8344f` |
+| `hal_espressif` | [#696](https://github.com/zephyrproject-rtos/hal_espressif/pull/696) | `c92bdba14303` |
+
+All other Zephyr modules are at the revisions pinned by the `west.yml` of the
+Zephyr pull request. The toolchain is Zephyr SDK 1.0.1 and the flasher is
+esptool 5.6.0.
+
+Create a separate workspace for the pull request, then install the Python
+packages and blobs as in
+[Setting up the Zephyr workspace](#setting-up-the-zephyr-workspace):
+
+```shell
+export ZEPHYR_WORKSPACE=~/zephyr-s31-pr125547
+
+mkdir -p "$ZEPHYR_WORKSPACE" && cd "$ZEPHYR_WORKSPACE"
+west init -m https://github.com/zephyrproject-rtos/zephyr .
+git -C zephyr fetch origin pull/125547/head
+git -C zephyr checkout 0beac8d8344f
+west update
+```
+
+The `west.yml` of the pull request takes `hal_espressif` from `pull/696/head`,
+which moves when that pull request is updated. Check out `c92bdba14303` in
+`modules/hal/espressif` to reproduce the tested build.
+
+```shell
+cd "$CHIP/examples/lighting-app/esp32_zephyr"
+west build -p always -b esp32s31_function_coreboard/esp32s31/hpcore
+```
+
+Known gaps on ESP32-S31:
+
+-   Wi-Fi only. The Zephyr port has no 802.15.4 driver, so `overlay-thread.conf`
+    does not apply.
+-   The on-network and `build_examples.py` variants are not tested.
+-   The Ethernet MAC of the board is disabled in the board configuration.
 
 ## Flashing and Monitoring
 
