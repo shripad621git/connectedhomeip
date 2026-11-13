@@ -1,0 +1,3273 @@
+From f6428ff4eff91c45ed8850a1deb9ea2a20d7b40e Mon Sep 17 00:00:00 2001
+From: shripad621git <shripad62001@gmail.com>
+Date: Thu, 12 Nov 2026 23:50:17 +0530
+Subject: [PATCH 2/3] fix(esp32s31): use tinycrypt for br/edr pairing keys
+
+- Add the tinycrypt ECC, SHA-256 and HMAC sources from ESP-IDF
+- Build the BR/EDR controller port against tinycrypt instead of PSA
+- Use the software ECC path, the ECC peripheral code is not built
+
+The controller creates a P-192 key pair at start-up and asserts when
+that fails. TF-PSA-Crypto has no P-192 curve, so the PSA path crashed
+at boot on hardware.
+---
+ components/bt/common/tinycrypt/AUTHORS        |   15 +
+ components/bt/common/tinycrypt/LICENSE        |   61 +
+ .../tinycrypt/include/tinycrypt/constants.h   |   65 +
+ .../common/tinycrypt/include/tinycrypt/ecc.h  |  607 ++++++++++
+ .../tinycrypt/include/tinycrypt/ecc_dh.h      |  135 +++
+ .../include/tinycrypt/ecc_platform_specific.h |   85 ++
+ .../common/tinycrypt/include/tinycrypt/hmac.h |  143 +++
+ .../tinycrypt/include/tinycrypt/sha256.h      |  135 +++
+ .../tinycrypt/include/tinycrypt/utils.h       |  101 ++
+ components/bt/common/tinycrypt/src/ecc.c      | 1073 +++++++++++++++++
+ components/bt/common/tinycrypt/src/ecc_dh.c   |  204 ++++
+ components/bt/common/tinycrypt/src/hmac.c     |  153 +++
+ components/bt/common/tinycrypt/src/sha256.c   |  221 ++++
+ components/bt/common/tinycrypt/src/utils.c    |   80 ++
+ .../bt/controller/esp32s31/esp_bt_cfg.h       |    3 -
+ zephyr/esp32s31/CMakeLists.txt                |   12 +
+ .../src/bt/include/esp_tinycrypt_port.h       |   16 +
+ 17 files changed, 3106 insertions(+), 3 deletions(-)
+ create mode 100644 components/bt/common/tinycrypt/AUTHORS
+ create mode 100644 components/bt/common/tinycrypt/LICENSE
+ create mode 100644 components/bt/common/tinycrypt/include/tinycrypt/constants.h
+ create mode 100644 components/bt/common/tinycrypt/include/tinycrypt/ecc.h
+ create mode 100644 components/bt/common/tinycrypt/include/tinycrypt/ecc_dh.h
+ create mode 100644 components/bt/common/tinycrypt/include/tinycrypt/ecc_platform_specific.h
+ create mode 100644 components/bt/common/tinycrypt/include/tinycrypt/hmac.h
+ create mode 100644 components/bt/common/tinycrypt/include/tinycrypt/sha256.h
+ create mode 100644 components/bt/common/tinycrypt/include/tinycrypt/utils.h
+ create mode 100644 components/bt/common/tinycrypt/src/ecc.c
+ create mode 100644 components/bt/common/tinycrypt/src/ecc_dh.c
+ create mode 100644 components/bt/common/tinycrypt/src/hmac.c
+ create mode 100644 components/bt/common/tinycrypt/src/sha256.c
+ create mode 100644 components/bt/common/tinycrypt/src/utils.c
+ create mode 100644 zephyr/esp32s31/src/bt/include/esp_tinycrypt_port.h
+
+diff --git a/components/bt/common/tinycrypt/AUTHORS b/components/bt/common/tinycrypt/AUTHORS
+new file mode 100644
+index 000000000..bd1c1a1ff
+--- /dev/null
++++ b/components/bt/common/tinycrypt/AUTHORS
+@@ -0,0 +1,15 @@
++Architect:
++Rafael Misoczki <rafael.misoczki@intel.com>
++
++Open Source Maintainer:
++Constanza Heath <constanza.m.heath@intel.com>
++Rafael Misoczki <rafael.misoczki@intel.com>
++
++Contributors:
++Constanza Heath <constanza.m.heath@intel.com>
++Rafael Misoczki <rafael.misoczki@intel.com>
++Flavio Santes <flavio.santes@intel.com>
++Jarkko Sakkinen <jarkko.sakkinen@intel.com>
++Chris Morrison
++Marti Bolivar
++Colin Ian King
+diff --git a/components/bt/common/tinycrypt/LICENSE b/components/bt/common/tinycrypt/LICENSE
+new file mode 100644
+index 000000000..b3c552430
+--- /dev/null
++++ b/components/bt/common/tinycrypt/LICENSE
+@@ -0,0 +1,61 @@
++
++================================================================================
++
++                     TinyCrypt Cryptographic Library
++
++================================================================================
++
++          Copyright (c) 2017, Intel Corporation. All rights reserved.
++
++Redistribution and use in source and binary forms, with or without modification,
++are permitted provided that the following conditions are met:
++
++  - Redistributions of source code must retain the above copyright notice, this
++      list of conditions and the following disclaimer.
++
++  - Redistributions in binary form must reproduce the above copyright notice,
++      this list of conditions and the following disclaimer in the documentation
++      and/or other materials provided with the distribution.
++
++  - Neither the name of the Intel Corporation nor the names of its contributors
++      may be used to endorse or promote products derived from this software
++      without specific prior written permission.
++
++
++THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
++ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
++WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
++DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR
++ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
++(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
++LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
++ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
++SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++================================================================================
++Copyright (c) 2014, Kenneth MacKay
++All rights reserved.
++
++https://github.com/kmackay/micro-ecc
++
++Redistribution and use in source and binary forms, with or without modification,
++are permitted provided that the following conditions are met:
++ * Redistributions of source code must retain the above copyright notice, this
++   list of conditions and the following disclaimer.
++ * Redistributions in binary form must reproduce the above copyright notice,
++   this list of conditions and the following disclaimer in the documentation
++   and/or other materials provided with the distribution.
++
++THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
++ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
++WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
++DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR
++ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
++(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
++LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
++ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
++SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++================================================================================
+diff --git a/components/bt/common/tinycrypt/include/tinycrypt/constants.h b/components/bt/common/tinycrypt/include/tinycrypt/constants.h
+new file mode 100644
+index 000000000..3abe98dbb
+--- /dev/null
++++ b/components/bt/common/tinycrypt/include/tinycrypt/constants.h
+@@ -0,0 +1,65 @@
++/*
++ * SPDX-FileCopyrightText: 2025 Espressif Systems (Shanghai) CO LTD
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++/*
++ *  Copyright (C) 2017 by Intel Corporation, All Rights Reserved.
++ *
++ *  Redistribution and use in source and binary forms, with or without
++ *  modification, are permitted provided that the following conditions are met:
++ *
++ *    - Redistributions of source code must retain the above copyright notice,
++ *     this list of conditions and the following disclaimer.
++ *
++ *    - Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ *
++ *    - Neither the name of Intel Corporation nor the names of its contributors
++ *    may be used to endorse or promote products derived from this software
++ *    without specific prior written permission.
++ *
++ *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ *  AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ *  IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ *  ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++ *  LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ *  CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ *  SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ *  INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ *  CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ *  POSSIBILITY OF SUCH DAMAGE.
++ */
++
++/**
++ * @file
++ * @brief -- Interface to constants.
++ *
++ */
++
++#ifndef __TC_CONSTANTS_H__
++#define __TC_CONSTANTS_H__
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++#include <stdbool.h>
++
++#ifndef NULL
++#define NULL ((void *)0)
++#endif
++
++#define TC_CRYPTO_SUCCESS 1
++#define TC_CRYPTO_FAIL 0
++
++#define TC_ZERO_BYTE 0x00
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* __TC_CONSTANTS_H__ */
+diff --git a/components/bt/common/tinycrypt/include/tinycrypt/ecc.h b/components/bt/common/tinycrypt/include/tinycrypt/ecc.h
+new file mode 100644
+index 000000000..368cfe919
+--- /dev/null
++++ b/components/bt/common/tinycrypt/include/tinycrypt/ecc.h
+@@ -0,0 +1,607 @@
++/*
++ * SPDX-FileCopyrightText: 2025 Espressif Systems (Shanghai) CO LTD
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++/* ecc.h - TinyCrypt interface to common ECC functions */
++
++/* Copyright (c) 2014, Kenneth MacKay
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are met:
++ *
++ * * Redistributions of source code must retain the above copyright notice, this
++ *   list of conditions and the following disclaimer.
++ *
++ * * Redistributions in binary form must reproduce the above copyright notice,
++ *   this list of conditions and the following disclaimer in the documentation
++ *   and/or other materials provided with the distribution.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ */
++
++/*
++ *  Copyright (C) 2017 by Intel Corporation, All Rights Reserved.
++ *
++ *  Redistribution and use in source and binary forms, with or without
++ *  modification, are permitted provided that the following conditions are met:
++ *
++ *    - Redistributions of source code must retain the above copyright notice,
++ *     this list of conditions and the following disclaimer.
++ *
++ *    - Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ *
++ *    - Neither the name of Intel Corporation nor the names of its contributors
++ *    may be used to endorse or promote products derived from this software
++ *    without specific prior written permission.
++ *
++ *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ *  AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ *  IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ *  ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++ *  LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ *  CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ *  SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ *  INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ *  CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ *  POSSIBILITY OF SUCH DAMAGE.
++ */
++
++/**
++ * @file
++ * @brief -- Interface to common ECC functions.
++ *
++ *  Overview: This software is an implementation of common functions
++ *            necessary to elliptic curve cryptography. This implementation uses
++ *            curve NIST p-256.
++ *
++ *  Security: The curve NIST p-256 provides approximately 128 bits of security.
++ *
++ */
++
++#ifndef __TC_UECC_H__
++#define __TC_UECC_H__
++
++#include "sdkconfig.h"
++#include <stdint.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++#define uECC_VLI_NATIVE_LITTLE_ENDIAN 1
++#define uECC_SUPPORTS_secp256r1       1
++
++#ifndef uECC_SUPPORTS_secp192r1
++#if defined(CONFIG_BT_CTRL_BREDR_ENABLE) && (CONFIG_BT_SMP_CRYPTO_STACK_TINYCRYPT)
++    #define uECC_SUPPORTS_secp192r1       1
++#else
++    #define uECC_SUPPORTS_secp192r1       0
++#endif
++#endif
++
++/* Word size (4 bytes considering 32-bits architectures) */
++#define uECC_WORD_SIZE 4
++
++/* setting max number of calls to prng: */
++#ifndef uECC_RNG_MAX_TRIES
++#define uECC_RNG_MAX_TRIES 64
++#endif
++
++/* defining data types to store word and bit counts: */
++typedef int8_t wordcount_t;
++typedef int16_t bitcount_t;
++/* defining data type for comparison result: */
++typedef int8_t cmpresult_t;
++/* defining data type to store ECC coordinate/point in 32bits words: */
++typedef unsigned int uECC_word_t;
++/* defining data type to store an ECC coordinate/point in 64bits words: */
++typedef uint64_t uECC_dword_t;
++
++/* defining masks useful for ecc computations: */
++#define HIGH_BIT_SET 0x80000000
++#define uECC_WORD_BITS 32
++#define uECC_WORD_BITS_SHIFT 5
++#define uECC_WORD_BITS_MASK 0x01F
++
++/* Number of words of 32 bits to represent an element of the the curve p-256: */
++#define NUM_ECC_WORDS 8
++/* Number of bytes to represent an element of the the curve p-256: */
++#define NUM_ECC_BYTES (uECC_WORD_SIZE*NUM_ECC_WORDS)
++
++#if uECC_SUPPORTS_secp192r1
++/* Number of words of 32 bits to represent an element of the the curve p-192: */
++#define NUM_ECC_WORDS_SECP192R1 6
++/* Number of bytes to represent an element of the the curve p-192: */
++#define NUM_ECC_BYTES_SECP192R1 (uECC_WORD_SIZE * NUM_ECC_WORDS_SECP192R1)
++#endif
++
++/* structure that represents an elliptic curve (e.g. p256):*/
++struct uECC_Curve_t;
++typedef const struct uECC_Curve_t * uECC_Curve;
++struct uECC_Curve_t {
++  wordcount_t num_words;
++  wordcount_t num_bytes;
++  bitcount_t num_n_bits;
++  uECC_word_t p[NUM_ECC_WORDS];
++  uECC_word_t n[NUM_ECC_WORDS];
++  uECC_word_t G[NUM_ECC_WORDS * 2];
++  uECC_word_t b[NUM_ECC_WORDS];
++  void (*double_jacobian)(uECC_word_t * X1, uECC_word_t * Y1, uECC_word_t * Z1,
++	uECC_Curve curve);
++  void (*x_side)(uECC_word_t *result, const uECC_word_t *x, uECC_Curve curve);
++  void (*mmod_fast)(uECC_word_t *result, uECC_word_t *product);
++};
++
++/*
++ * @brief computes doubling of point ion jacobian coordinates, in place.
++ * @param X1 IN/OUT -- x coordinate
++ * @param Y1 IN/OUT -- y coordinate
++ * @param Z1 IN/OUT -- z coordinate
++ * @param curve IN -- elliptic curve
++ */
++void double_jacobian_default(uECC_word_t * X1, uECC_word_t * Y1,
++			     uECC_word_t * Z1, uECC_Curve curve);
++
++/*
++ * @brief Computes x^3 + ax + b. result must not overlap x.
++ * @param result OUT -- x^3 + ax + b
++ * @param x IN -- value of x
++ * @param curve IN -- elliptic curve
++ */
++void x_side_default(uECC_word_t *result, const uECC_word_t *x,
++		    uECC_Curve curve);
++
++/*
++ * @brief Computes result = product % curve_p
++ * from http://www.nsa.gov/ia/_files/nist-routines.pdf
++ * @param result OUT -- product % curve_p
++ * @param product IN -- value to be reduced mod curve_p
++ */
++void vli_mmod_fast_secp256r1(unsigned int *result, unsigned int *product);
++
++/* Bytes to words ordering: */
++#define BYTES_TO_WORDS_8(a, b, c, d, e, f, g, h) 0x##d##c##b##a, 0x##h##g##f##e
++#define BYTES_TO_WORDS_4(a, b, c, d) 0x##d##c##b##a
++#define BITS_TO_WORDS(num_bits) \
++	((num_bits + ((uECC_WORD_SIZE * 8) - 1)) / (uECC_WORD_SIZE * 8))
++#define BITS_TO_BYTES(num_bits) ((num_bits + 7) / 8)
++
++/* definition of curve NIST p-256: */
++static const struct uECC_Curve_t curve_secp256r1 = {
++	NUM_ECC_WORDS,
++	NUM_ECC_BYTES,
++	256, /* num_n_bits */ {
++		BYTES_TO_WORDS_8(FF, FF, FF, FF, FF, FF, FF, FF),
++		BYTES_TO_WORDS_8(FF, FF, FF, FF, 00, 00, 00, 00),
++        	BYTES_TO_WORDS_8(00, 00, 00, 00, 00, 00, 00, 00),
++        	BYTES_TO_WORDS_8(01, 00, 00, 00, FF, FF, FF, FF)
++	}, {
++		BYTES_TO_WORDS_8(51, 25, 63, FC, C2, CA, B9, F3),
++            	BYTES_TO_WORDS_8(84, 9E, 17, A7, AD, FA, E6, BC),
++            	BYTES_TO_WORDS_8(FF, FF, FF, FF, FF, FF, FF, FF),
++            	BYTES_TO_WORDS_8(00, 00, 00, 00, FF, FF, FF, FF)
++	}, {
++		BYTES_TO_WORDS_8(96, C2, 98, D8, 45, 39, A1, F4),
++                BYTES_TO_WORDS_8(A0, 33, EB, 2D, 81, 7D, 03, 77),
++                BYTES_TO_WORDS_8(F2, 40, A4, 63, E5, E6, BC, F8),
++                BYTES_TO_WORDS_8(47, 42, 2C, E1, F2, D1, 17, 6B),
++
++                BYTES_TO_WORDS_8(F5, 51, BF, 37, 68, 40, B6, CB),
++                BYTES_TO_WORDS_8(CE, 5E, 31, 6B, 57, 33, CE, 2B),
++                BYTES_TO_WORDS_8(16, 9E, 0F, 7C, 4A, EB, E7, 8E),
++                BYTES_TO_WORDS_8(9B, 7F, 1A, FE, E2, 42, E3, 4F)
++	}, {
++		BYTES_TO_WORDS_8(4B, 60, D2, 27, 3E, 3C, CE, 3B),
++                BYTES_TO_WORDS_8(F6, B0, 53, CC, B0, 06, 1D, 65),
++                BYTES_TO_WORDS_8(BC, 86, 98, 76, 55, BD, EB, B3),
++                BYTES_TO_WORDS_8(E7, 93, 3A, AA, D8, 35, C6, 5A)
++	},
++        &double_jacobian_default,
++        &x_side_default,
++        &vli_mmod_fast_secp256r1
++};
++
++uECC_Curve uECC_secp256r1(void);
++
++#if uECC_SUPPORTS_secp192r1
++
++uECC_Curve uECC_secp192r1(void);
++
++/*
++ * @brief Computes result = product % curve_p (NIST P-192)
++ * from http://www.nsa.gov/ia/_files/nist-routines.pdf
++ * @param result OUT -- product % curve_p
++ * @param product IN -- value to be reduced mod curve_p
++ */
++void vli_mmod_fast_secp192r1(unsigned int *result, unsigned int *product);
++
++/* definition of curve NIST p-192: */
++static const struct uECC_Curve_t curve_secp192r1 = { NUM_ECC_WORDS_SECP192R1,
++                                                     NUM_ECC_BYTES_SECP192R1,
++                                                     192, /* num_n_bits */
++                                                     { BYTES_TO_WORDS_8(FF, FF, FF, FF, FF, FF, FF, FF),
++                                                       BYTES_TO_WORDS_8(FE, FF, FF, FF, FF, FF, FF, FF),
++                                                       BYTES_TO_WORDS_8(FF, FF, FF, FF, FF, FF, FF, FF) },
++                                                     { BYTES_TO_WORDS_8(31, 28, D2, B4, B1, C9, 6B, 14),
++                                                       BYTES_TO_WORDS_8(36, F8, DE, 99, FF, FF, FF, FF),
++                                                       BYTES_TO_WORDS_8(FF, FF, FF, FF, FF, FF, FF, FF) },
++                                                     { BYTES_TO_WORDS_8(12, 10, FF, 82, FD, 0A, FF, F4),
++                                                       BYTES_TO_WORDS_8(00, 88, A1, 43, EB, 20, BF, 7C),
++                                                       BYTES_TO_WORDS_8(F6, 90, 30, B0, 0E, A8, 8D, 18),
++
++                                                       BYTES_TO_WORDS_8(11, 48, 79, 1E, A1, 77, F9, 73),
++                                                       BYTES_TO_WORDS_8(D5, CD, 24, 6B, ED, 11, 10, 63),
++                                                       BYTES_TO_WORDS_8(78, DA, C8, FF, 95, 2B, 19, 07) },
++                                                     { BYTES_TO_WORDS_8(B1, B9, 46, C1, EC, DE, B8, FE),
++                                                       BYTES_TO_WORDS_8(49, 30, 24, 72, AB, E9, A7, 0F),
++                                                       BYTES_TO_WORDS_8(E7, 80, 9C, E5, 19, 05, 21, 64) },
++                                                     &double_jacobian_default,
++                                                     &x_side_default,
++                                                     &vli_mmod_fast_secp192r1 };
++#endif /* uECC_SUPPORTS_secp192r1 */
++
++/*
++ * @brief Generates a random integer in the range 0 < random < top.
++ * Both random and top have num_words words.
++ * @param random OUT -- random integer in the range 0 < random < top
++ * @param top IN -- upper limit
++ * @param num_words IN -- number of words
++ * @return a random integer in the range 0 < random < top
++ */
++int uECC_generate_random_int(uECC_word_t *random, const uECC_word_t *top,
++			     wordcount_t num_words);
++
++
++/* uECC_RNG_Function type
++ * The RNG function should fill 'size' random bytes into 'dest'. It should
++ * return 1 if 'dest' was filled with random data, or 0 if the random data could
++ * not be generated. The filled-in values should be either truly random, or from
++ * a cryptographically-secure PRNG.
++ *
++ * A correctly functioning RNG function must be set (using uECC_set_rng())
++ * before calling uECC_make_key() or uECC_sign().
++ *
++ * Setting a correctly functioning RNG function improves the resistance to
++ * side-channel attacks for uECC_shared_secret().
++ *
++ * A correct RNG function is set by default. If you are building on another
++ * POSIX-compliant system that supports /dev/random or /dev/urandom, you can
++ * define uECC_POSIX to use the predefined RNG.
++ */
++typedef int(*uECC_RNG_Function)(uint8_t *dest, unsigned int size);
++
++/*
++ * @brief Set the function that will be used to generate random bytes. The RNG
++ * function should return 1 if the random data was generated, or 0 if the random
++ * data could not be generated.
++ *
++ * @note On platforms where there is no predefined RNG function, this must be
++ * called before uECC_make_key() or uECC_sign() are used.
++ *
++ * @param rng_function IN -- function that will be used to generate random bytes
++ */
++void uECC_set_rng(uECC_RNG_Function rng_function);
++
++/*
++ * @brief provides current uECC_RNG_Function.
++ * @return Returns the function that will be used to generate random bytes.
++ */
++uECC_RNG_Function uECC_get_rng(void);
++
++/*
++ * @brief computes the size of a private key for the curve in bytes.
++ * @param curve IN -- elliptic curve
++ * @return size of a private key for the curve in bytes.
++ */
++int uECC_curve_private_key_size(uECC_Curve curve);
++
++/*
++ * @brief computes the size of a public key for the curve in bytes.
++ * @param curve IN -- elliptic curve
++ * @return the size of a public key for the curve in bytes.
++ */
++int uECC_curve_public_key_size(uECC_Curve curve);
++
++/*
++ * @brief Compute the corresponding public key for a private key.
++ * @param private_key IN -- The private key to compute the public key for
++ * @param public_key OUT -- Will be filled in with the corresponding public key
++ * @param curve
++ * @return Returns 1 if key was computed successfully, 0 if an error occurred.
++ */
++int uECC_compute_public_key(const uint8_t *private_key,
++			    uint8_t *public_key, uECC_Curve curve);
++
++/*
++ * @brief Compute public-key.
++ * @return corresponding public-key.
++ * @param result OUT -- public-key
++ * @param private_key IN -- private-key
++ * @param curve IN -- elliptic curve
++ */
++uECC_word_t EccPoint_compute_public_key(uECC_word_t *result,
++					uECC_word_t *private_key, uECC_Curve curve);
++
++/*
++ * @brief Regularize the bitcount for the private key so that attackers cannot
++ * use a side channel attack to learn the number of leading zeros.
++ * @return Regularized k
++ * @param k IN -- private-key
++ * @param k0 IN/OUT -- regularized k
++ * @param k1 IN/OUT -- regularized k
++ * @param curve IN -- elliptic curve
++ */
++uECC_word_t regularize_k(const uECC_word_t * const k, uECC_word_t *k0,
++			 uECC_word_t *k1, uECC_Curve curve);
++
++/*
++ * @brief Point multiplication algorithm using Montgomery's ladder with co-Z
++ * coordinates. See http://eprint.iacr.org/2011/338.pdf.
++ * @note Result may overlap point.
++ * @param result OUT -- returns scalar*point
++ * @param point IN -- elliptic curve point
++ * @param scalar IN -- scalar
++ * @param initial_Z IN -- initial value for z
++ * @param num_bits IN -- number of bits in scalar
++ * @param curve IN -- elliptic curve
++ */
++void EccPoint_mult(uECC_word_t * result, const uECC_word_t * point,
++		   const uECC_word_t * scalar, const uECC_word_t * initial_Z,
++		   bitcount_t num_bits, uECC_Curve curve);
++
++/*
++ * @brief Constant-time comparison to zero - secure way to compare long integers
++ * @param vli IN -- very long integer
++ * @param num_words IN -- number of words in the vli
++ * @return 1 if vli == 0, 0 otherwise.
++ */
++uECC_word_t uECC_vli_isZero(const uECC_word_t *vli, wordcount_t num_words);
++
++/*
++ * @brief Check if 'point' is the point at infinity
++ * @param point IN -- elliptic curve point
++ * @param curve IN -- elliptic curve
++ * @return if 'point' is the point at infinity, 0 otherwise.
++ */
++uECC_word_t EccPoint_isZero(const uECC_word_t *point, uECC_Curve curve);
++
++/*
++ * @brief computes the sign of left - right, in constant time.
++ * @param left IN -- left term to be compared
++ * @param right IN -- right term to be compared
++ * @param num_words IN -- number of words
++ * @return the sign of left - right
++ */
++cmpresult_t uECC_vli_cmp(const uECC_word_t *left, const uECC_word_t *right,
++			 wordcount_t num_words);
++
++/*
++ * @brief computes sign of left - right, not in constant time.
++ * @note should not be used if inputs are part of a secret
++ * @param left IN -- left term to be compared
++ * @param right IN -- right term to be compared
++ * @param num_words IN -- number of words
++ * @return the sign of left - right
++ */
++cmpresult_t uECC_vli_cmp_unsafe(const uECC_word_t *left, const uECC_word_t *right,
++				wordcount_t num_words);
++
++/*
++ * @brief Computes result = (left - right) % mod.
++ * @note Assumes that (left < mod) and (right < mod), and that result does not
++ * overlap mod.
++ * @param result OUT -- (left - right) % mod
++ * @param left IN -- leftright term in modular subtraction
++ * @param right IN -- right term in modular subtraction
++ * @param mod IN -- mod
++ * @param num_words IN -- number of words
++ */
++void uECC_vli_modSub(uECC_word_t *result, const uECC_word_t *left,
++		     const uECC_word_t *right, const uECC_word_t *mod,
++		     wordcount_t num_words);
++
++/*
++ * @brief Computes P' = (x1', y1', Z3), P + Q = (x3, y3, Z3) or
++ * P => P', Q => P + Q
++ * @note assumes Input P = (x1, y1, Z), Q = (x2, y2, Z)
++ * @param X1 IN -- x coordinate of P
++ * @param Y1 IN -- y coordinate of P
++ * @param X2 IN -- x coordinate of Q
++ * @param Y2 IN -- y coordinate of Q
++ * @param curve IN -- elliptic curve
++ */
++void XYcZ_add(uECC_word_t * X1, uECC_word_t * Y1, uECC_word_t * X2,
++	      uECC_word_t * Y2, uECC_Curve curve);
++
++/*
++ * @brief Computes (x1 * z^2, y1 * z^3)
++ * @param X1 IN -- previous x1 coordinate
++ * @param Y1 IN -- previous y1 coordinate
++ * @param Z IN -- z value
++ * @param curve IN -- elliptic curve
++ */
++void apply_z(uECC_word_t * X1, uECC_word_t * Y1, const uECC_word_t * const Z,
++	     uECC_Curve curve);
++
++/*
++ * @brief Check if bit is set.
++ * @return Returns nonzero if bit 'bit' of vli is set.
++ * @warning It is assumed that the value provided in 'bit' is within the
++ * boundaries of the word-array 'vli'.
++ * @note The bit ordering layout assumed for vli is: {31, 30, ..., 0},
++ * {63, 62, ..., 32}, {95, 94, ..., 64}, {127, 126,..., 96} for a vli consisting
++ * of 4 uECC_word_t elements.
++ */
++uECC_word_t uECC_vli_testBit(const uECC_word_t *vli, bitcount_t bit);
++
++/*
++ * @brief Computes result = product % mod, where product is 2N words long.
++ * @param result OUT -- product % mod
++ * @param mod IN -- module
++ * @param num_words IN -- number of words
++ * @warning Currently only designed to work for curve_p or curve_n.
++ */
++void uECC_vli_mmod(uECC_word_t *result, uECC_word_t *product,
++		   const uECC_word_t *mod, wordcount_t num_words);
++
++/*
++ * @brief Computes modular product (using curve->mmod_fast)
++ * @param result OUT -- (left * right) mod % curve_p
++ * @param left IN -- left term in product
++ * @param right IN -- right term in product
++ * @param curve IN -- elliptic curve
++ */
++void uECC_vli_modMult_fast(uECC_word_t *result, const uECC_word_t *left,
++			   const uECC_word_t *right, uECC_Curve curve);
++
++/*
++ * @brief Computes result = left - right.
++ * @note Can modify in place.
++ * @param result OUT -- left - right
++ * @param left IN -- left term in subtraction
++ * @param right IN -- right term in subtraction
++ * @param num_words IN -- number of words
++ * @return borrow
++ */
++uECC_word_t uECC_vli_sub(uECC_word_t *result, const uECC_word_t *left,
++			 const uECC_word_t *right, wordcount_t num_words);
++
++/*
++ * @brief Constant-time comparison function(secure way to compare long ints)
++ * @param left IN -- left term in comparison
++ * @param right IN -- right term in comparison
++ * @param num_words IN -- number of words
++ * @return Returns 0 if left == right, 1 otherwise.
++ */
++uECC_word_t uECC_vli_equal(const uECC_word_t *left, const uECC_word_t *right,
++			   wordcount_t num_words);
++
++/*
++ * @brief Computes (left * right) % mod
++ * @param result OUT -- (left * right) % mod
++ * @param left IN -- left term in product
++ * @param right IN -- right term in product
++ * @param mod IN -- mod
++ * @param num_words IN -- number of words
++ */
++void uECC_vli_modMult(uECC_word_t *result, const uECC_word_t *left,
++		      const uECC_word_t *right, const uECC_word_t *mod,
++	              wordcount_t num_words);
++
++/*
++ * @brief Computes (1 / input) % mod
++ * @note All VLIs are the same size.
++ * @note See "Euclid's GCD to Montgomery Multiplication to the Great Divide"
++ * @param result OUT -- (1 / input) % mod
++ * @param input IN -- value to be modular inverted
++ * @param mod IN -- mod
++ * @param num_words -- number of words
++ */
++void uECC_vli_modInv(uECC_word_t *result, const uECC_word_t *input,
++		     const uECC_word_t *mod, wordcount_t num_words);
++
++/*
++ * @brief Sets dest = src.
++ * @param dest OUT -- destination buffer
++ * @param src IN --  origin buffer
++ * @param num_words IN -- number of words
++ */
++void uECC_vli_set(uECC_word_t *dest, const uECC_word_t *src,
++		  wordcount_t num_words);
++
++/*
++ * @brief Computes (left + right) % mod.
++ * @note Assumes that (left < mod) and right < mod), and that result does not
++ * overlap mod.
++ * @param result OUT -- (left + right) % mod.
++ * @param left IN -- left term in addition
++ * @param right IN -- right term in addition
++ * @param mod IN -- mod
++ * @param num_words IN -- number of words
++ */
++void uECC_vli_modAdd(uECC_word_t *result,  const uECC_word_t *left,
++    		     const uECC_word_t *right, const uECC_word_t *mod,
++   		     wordcount_t num_words);
++
++/*
++ * @brief Counts the number of bits required to represent vli.
++ * @param vli IN -- very long integer
++ * @param max_words IN -- number of words
++ * @return number of bits in given vli
++ */
++bitcount_t uECC_vli_numBits(const uECC_word_t *vli,
++			    const wordcount_t max_words);
++
++/*
++ * @brief Erases (set to 0) vli
++ * @param vli IN -- very long integer
++ * @param num_words IN -- number of words
++ */
++void uECC_vli_clear(uECC_word_t *vli, wordcount_t num_words);
++
++/*
++ * @brief check if it is a valid point in the curve
++ * @param point IN -- point to be checked
++ * @param curve IN -- elliptic curve
++ * @return 0 if point is valid
++ * @exception returns -1 if it is a point at infinity
++ * @exception returns -2 if x or y is smaller than p,
++ * @exception returns -3 if y^2 != x^3 + ax + b.
++ */
++int uECC_valid_point(const uECC_word_t *point, uECC_Curve curve);
++
++/*
++ * @brief Check if a public key is valid.
++ * @param public_key IN -- The public key to be checked.
++ * @return returns 0 if the public key is valid
++ * @exception returns -1 if it is a point at infinity
++ * @exception returns -2 if x or y is smaller than p,
++ * @exception returns -3 if y^2 != x^3 + ax + b.
++ * @exception returns -4 if public key is the group generator.
++ *
++ * @note Note that you are not required to check for a valid public key before
++ * using any other uECC functions. However, you may wish to avoid spending CPU
++ * time computing a shared secret or verifying a signature using an invalid
++ * public key.
++ */
++int uECC_valid_public_key(const uint8_t *public_key, uECC_Curve curve);
++
++ /*
++  * @brief Converts an integer in uECC native format to big-endian bytes.
++  * @param bytes OUT -- bytes representation
++  * @param num_bytes IN -- number of bytes
++  * @param native IN -- uECC native representation
++  */
++void uECC_vli_nativeToBytes(uint8_t *bytes, int num_bytes,
++    			    const unsigned int *native);
++
++/*
++ * @brief Converts big-endian bytes to an integer in uECC native format.
++ * @param native OUT -- uECC native representation
++ * @param bytes IN -- bytes representation
++ * @param num_bytes IN -- number of bytes
++ */
++void uECC_vli_bytesToNative(unsigned int *native, const uint8_t *bytes,
++			    int num_bytes);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* __TC_UECC_H__ */
+diff --git a/components/bt/common/tinycrypt/include/tinycrypt/ecc_dh.h b/components/bt/common/tinycrypt/include/tinycrypt/ecc_dh.h
+new file mode 100644
+index 000000000..e28e8a653
+--- /dev/null
++++ b/components/bt/common/tinycrypt/include/tinycrypt/ecc_dh.h
+@@ -0,0 +1,135 @@
++/*
++ * SPDX-FileCopyrightText: 2025 Espressif Systems (Shanghai) CO LTD
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++/*
++ * Copyright (c) 2014, Kenneth MacKay
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are met:
++ *
++ * * Redistributions of source code must retain the above copyright notice, this
++ *   list of conditions and the following disclaimer.
++ *
++ * * Redistributions in binary form must reproduce the above copyright notice,
++ *   this list of conditions and the following disclaimer in the documentation
++ *   and/or other materials provided with the distribution.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ */
++
++/* Copyright (C) 2017 by Intel Corporation, All Rights Reserved.
++ *
++ *  Redistribution and use in source and binary forms, with or without
++ *  modification, are permitted provided that the following conditions are met:
++ *
++ *    - Redistributions of source code must retain the above copyright notice,
++ *     this list of conditions and the following disclaimer.
++ *
++ *    - Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ *
++ *    - Neither the name of Intel Corporation nor the names of its contributors
++ *    may be used to endorse or promote products derived from this software
++ *    without specific prior written permission.
++ *
++ *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ *  AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ *  IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ *  ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++ *  LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ *  CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ *  SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ *  INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ *  CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ *  POSSIBILITY OF SUCH DAMAGE.
++ */
++
++/**
++ * @file
++ * @brief -- Interface to EC-DH implementation.
++ *
++ *  Overview: This software is an implementation of EC-DH. This implementation
++ *            uses curve NIST p-256.
++ *
++ *  Security: The curve NIST p-256 provides approximately 128 bits of security.
++ */
++
++#ifndef __TC_ECC_DH_H__
++#define __TC_ECC_DH_H__
++
++#include <tinycrypt/ecc.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++/**
++ * @brief Create a public/private key pair.
++ * @return returns TC_CRYPTO_SUCCESS (1) if the key pair was generated successfully
++ *         returns TC_CRYPTO_FAIL (0) if error while generating key pair
++ *
++ * @param p_public_key OUT -- Will be filled in with the public key. Must be at
++ * least 2 * the curve size (in bytes) long. For curve secp256r1, p_public_key
++ * must be 64 bytes long.
++ * @param p_private_key OUT -- Will be filled in with the private key. Must be as
++ * long as the curve order (for secp256r1, p_private_key must be 32 bytes long).
++ *
++ * @note side-channel countermeasure: algorithm strengthened against timing
++ * attack.
++ * @warning A cryptographically-secure PRNG function must be set (using
++ * uECC_set_rng()) before calling uECC_make_key().
++ */
++int uECC_make_key(uint8_t *p_public_key, uint8_t *p_private_key, uECC_Curve curve);
++
++#ifdef ENABLE_TESTS
++
++/**
++ * @brief Create a public/private key pair given a specific d.
++ *
++ * @note THIS FUNCTION SHOULD BE CALLED ONLY FOR TEST PURPOSES. Refer to
++ * uECC_make_key() function for real applications.
++ */
++int uECC_make_key_with_d(uint8_t *p_public_key, uint8_t *p_private_key,
++    			 unsigned int *d, uECC_Curve curve);
++#endif
++
++/**
++ * @brief Compute a shared secret given your secret key and someone else's
++ * public key.
++ * @return returns TC_CRYPTO_SUCCESS (1) if the shared secret was computed successfully
++ *         returns TC_CRYPTO_FAIL (0) otherwise
++ *
++ * @param p_secret OUT -- Will be filled in with the shared secret value. Must be
++ * the same size as the curve size (for curve secp256r1, secret must be 32 bytes
++ * long.
++ * @param p_public_key IN -- The public key of the remote party.
++ * @param p_private_key IN -- Your private key.
++ *
++ * @warning It is recommended to use the output of uECC_shared_secret() as the
++ * input of a recommended Key Derivation Function (see NIST SP 800-108) in
++ * order to produce a cryptographically secure symmetric key.
++ */
++int uECC_shared_secret(const uint8_t *p_public_key, const uint8_t *p_private_key,
++		       uint8_t *p_secret, uECC_Curve curve);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* __TC_ECC_DH_H__ */
+diff --git a/components/bt/common/tinycrypt/include/tinycrypt/ecc_platform_specific.h b/components/bt/common/tinycrypt/include/tinycrypt/ecc_platform_specific.h
+new file mode 100644
+index 000000000..553c8a03d
+--- /dev/null
++++ b/components/bt/common/tinycrypt/include/tinycrypt/ecc_platform_specific.h
+@@ -0,0 +1,85 @@
++/*
++ * SPDX-FileCopyrightText: 2025 Espressif Systems (Shanghai) CO LTD
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++/* Copyright (c) 2014, Kenneth MacKay
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are met:
++ *  * Redistributions of source code must retain the above copyright notice,
++ *    this list of conditions and the following disclaimer.
++ *  * Redistributions in binary form must reproduce the above copyright notice,
++ *    this list of conditions and the following disclaimer in the documentation
++ *    and/or other materials provided with the distribution.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.*/
++
++/*
++ *  Copyright (C) 2017 by Intel Corporation, All Rights Reserved.
++ *
++ *  Redistribution and use in source and binary forms, with or without
++ *  modification, are permitted provided that the following conditions are met:
++ *
++ *    - Redistributions of source code must retain the above copyright notice,
++ *     this list of conditions and the following disclaimer.
++ *
++ *    - Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ *
++ *    - Neither the name of Intel Corporation nor the names of its contributors
++ *    may be used to endorse or promote products derived from this software
++ *    without specific prior written permission.
++ *
++ *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ *  AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ *  IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ *  ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++ *  LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ *  CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ *  SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ *  INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ *  CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ *  POSSIBILITY OF SUCH DAMAGE.
++ *
++ *  uECC_platform_specific.h -- Interface to platform specific functions
++ */
++
++#ifndef __UECC_PLATFORM_SPECIFIC_H_
++#define __UECC_PLATFORM_SPECIFIC_H_
++
++/*
++ * The RNG function should fill 'size' random bytes into 'dest'. It should
++ * return 1 if 'dest' was filled with random data, or 0 if the random data could
++ * not be generated. The filled-in values should be either truly random, or from
++ * a cryptographically-secure PRNG.
++ *
++ * A cryptographically-secure PRNG function must be set (using uECC_set_rng())
++ * before calling uECC_make_key() or uECC_sign().
++ *
++ * Setting a cryptographically-secure PRNG function improves the resistance to
++ * side-channel attacks for uECC_shared_secret().
++ *
++ * A correct PRNG function is set by default (default_RNG_defined = 1) and works
++ * for some platforms, such as Unix and Linux. For other platforms, you may need
++ * to provide another PRNG function.
++*/
++#define default_RNG_defined 0
++
++int default_CSPRNG(uint8_t *dest, unsigned int size);
++
++#endif /* __UECC_PLATFORM_SPECIFIC_H_ */
+diff --git a/components/bt/common/tinycrypt/include/tinycrypt/hmac.h b/components/bt/common/tinycrypt/include/tinycrypt/hmac.h
+new file mode 100644
+index 000000000..1f624ef82
+--- /dev/null
++++ b/components/bt/common/tinycrypt/include/tinycrypt/hmac.h
+@@ -0,0 +1,143 @@
++/*
++ * SPDX-FileCopyrightText: 2025 Espressif Systems (Shanghai) CO LTD
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++/*
++ *  Copyright (C) 2017 by Intel Corporation, All Rights Reserved.
++ *
++ *  Redistribution and use in source and binary forms, with or without
++ *  modification, are permitted provided that the following conditions are met:
++ *
++ *    - Redistributions of source code must retain the above copyright notice,
++ *     this list of conditions and the following disclaimer.
++ *
++ *    - Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ *
++ *    - Neither the name of Intel Corporation nor the names of its contributors
++ *    may be used to endorse or promote products derived from this software
++ *    without specific prior written permission.
++ *
++ *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ *  AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ *  IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ *  ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++ *  LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ *  CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ *  SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ *  INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ *  CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ *  POSSIBILITY OF SUCH DAMAGE.
++ */
++
++/**
++ * @file
++ * @brief Interface to an HMAC implementation.
++ *
++ *  Overview:   HMAC is a message authentication code based on hash functions.
++ *              TinyCrypt hard codes SHA-256 as the hash function. A message
++ *              authentication code based on hash functions is also called a
++ *              keyed cryptographic hash function since it performs a
++ *              transformation specified by a key in an arbitrary length data
++ *              set into a fixed length data set (also called tag).
++ *
++ *  Security:   The security of the HMAC depends on the length of the key and
++ *              on the security of the hash function. Note that HMAC primitives
++ *              are much less affected by collision attacks than their
++ *              corresponding hash functions.
++ *
++ *  Requires:   SHA-256
++ *
++ *  Usage:      1) call tc_hmac_set_key to set the HMAC key.
++ *
++ *              2) call tc_hmac_init to initialize a struct hash_state before
++ *              processing the data.
++ *
++ *              3) call tc_hmac_update to process the next input segment;
++ *              tc_hmac_update can be called as many times as needed to process
++ *              all of the segments of the input; the order is important.
++ *
++ *              4) call tc_hmac_final to out put the tag.
++ */
++
++#ifndef __TC_HMAC_H__
++#define __TC_HMAC_H__
++
++#include <tinycrypt/sha256.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++struct tc_hmac_state_struct {
++	/* the internal state required by h */
++	struct tc_sha256_state_struct hash_state;
++	/* HMAC key schedule */
++	uint8_t key[2*TC_SHA256_BLOCK_SIZE];
++};
++typedef struct tc_hmac_state_struct *TCHmacState_t;
++
++/**
++ *  @brief HMAC set key procedure
++ *  Configures ctx to use key
++ *  @return returns TC_CRYPTO_SUCCESS (1)
++ *          returns TC_CRYPTO_FAIL (0) if
++ *                ctx == NULL or
++ *                key == NULL or
++ *                key_size == 0
++ * @param ctx IN/OUT -- the struct tc_hmac_state_struct to initial
++ * @param key IN -- the HMAC key to configure
++ * @param key_size IN -- the HMAC key size
++ */
++int tc_hmac_set_key(TCHmacState_t ctx, const uint8_t *key,
++		    unsigned int key_size);
++
++/**
++ * @brief HMAC init procedure
++ * Initializes ctx to begin the next HMAC operation
++ * @return returns TC_CRYPTO_SUCCESS (1)
++ *         returns TC_CRYPTO_FAIL (0) if: ctx == NULL or key == NULL
++ * @param ctx IN/OUT -- struct tc_hmac_state_struct buffer to init
++ */
++int tc_hmac_init(TCHmacState_t ctx);
++
++/**
++ *  @brief HMAC update procedure
++ *  Mixes data_length bytes addressed by data into state
++ *  @return returns TC_CRYPTO_SUCCCESS (1)
++ *          returns TC_CRYPTO_FAIL (0) if: ctx == NULL or key == NULL
++ *  @note Assumes state has been initialized by tc_hmac_init
++ *  @param ctx IN/OUT -- state of HMAC computation so far
++ *  @param data IN -- data to incorporate into state
++ *  @param data_length IN -- size of data in bytes
++ */
++int tc_hmac_update(TCHmacState_t ctx, const void *data,
++		   unsigned int data_length);
++
++/**
++ *  @brief HMAC final procedure
++ *  Writes the HMAC tag into the tag buffer
++ *  @return returns TC_CRYPTO_SUCCESS (1)
++ *          returns TC_CRYPTO_FAIL (0) if:
++ *                tag == NULL or
++ *                ctx == NULL or
++ *                key == NULL or
++ *                taglen != TC_SHA256_DIGEST_SIZE
++ *  @note ctx is erased before exiting. This should never be changed/removed.
++ *  @note Assumes the tag buffer is at least sizeof(hmac_tag_size(state)) bytes
++ *  state has been initialized by tc_hmac_init
++ *  @param tag IN/OUT -- buffer to receive computed HMAC tag
++ *  @param taglen IN -- size of tag in bytes
++ *  @param ctx IN/OUT -- the HMAC state for computing tag
++ */
++int tc_hmac_final(uint8_t *tag, unsigned int taglen, TCHmacState_t ctx);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /*__TC_HMAC_H__*/
+diff --git a/components/bt/common/tinycrypt/include/tinycrypt/sha256.h b/components/bt/common/tinycrypt/include/tinycrypt/sha256.h
+new file mode 100644
+index 000000000..860665eea
+--- /dev/null
++++ b/components/bt/common/tinycrypt/include/tinycrypt/sha256.h
+@@ -0,0 +1,135 @@
++/*
++ * SPDX-FileCopyrightText: 2025 Espressif Systems (Shanghai) CO LTD
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++/* sha256.h - TinyCrypt interface to a SHA-256 implementation */
++
++/*
++ *  Copyright (C) 2017 by Intel Corporation, All Rights Reserved.
++ *
++ *  Redistribution and use in source and binary forms, with or without
++ *  modification, are permitted provided that the following conditions are met:
++ *
++ *    - Redistributions of source code must retain the above copyright notice,
++ *     this list of conditions and the following disclaimer.
++ *
++ *    - Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ *
++ *    - Neither the name of Intel Corporation nor the names of its contributors
++ *    may be used to endorse or promote products derived from this software
++ *    without specific prior written permission.
++ *
++ *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ *  AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ *  IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ *  ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++ *  LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ *  CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ *  SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ *  INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ *  CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ *  POSSIBILITY OF SUCH DAMAGE.
++ */
++
++/**
++ * @file
++ * @brief Interface to a SHA-256 implementation.
++ *
++ *  Overview:   SHA-256 is a NIST approved cryptographic hashing algorithm
++ *              specified in FIPS 180. A hash algorithm maps data of arbitrary
++ *              size to data of fixed length.
++ *
++ *  Security:   SHA-256 provides 128 bits of security against collision attacks
++ *              and 256 bits of security against pre-image attacks. SHA-256 does
++ *              NOT behave like a random oracle, but it can be used as one if
++ *              the string being hashed is prefix-free encoded before hashing.
++ *
++ *  Usage:      1) call tc_sha256_init to initialize a struct
++ *              tc_sha256_state_struct before hashing a new string.
++ *
++ *              2) call tc_sha256_update to hash the next string segment;
++ *              tc_sha256_update can be called as many times as needed to hash
++ *              all of the segments of a string; the order is important.
++ *
++ *              3) call tc_sha256_final to out put the digest from a hashing
++ *              operation.
++ */
++
++#ifndef __TC_SHA256_H__
++#define __TC_SHA256_H__
++
++#include <stddef.h>
++#include <stdint.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++#define TC_SHA256_BLOCK_SIZE (64)
++#define TC_SHA256_DIGEST_SIZE (32)
++#define TC_SHA256_STATE_BLOCKS (TC_SHA256_DIGEST_SIZE/4)
++
++struct tc_sha256_state_struct {
++	unsigned int iv[TC_SHA256_STATE_BLOCKS];
++	uint64_t bits_hashed;
++	uint8_t leftover[TC_SHA256_BLOCK_SIZE];
++	size_t leftover_offset;
++};
++
++typedef struct tc_sha256_state_struct *TCSha256State_t;
++
++/**
++ *  @brief SHA256 initialization procedure
++ *  Initializes s
++ *  @return returns TC_CRYPTO_SUCCESS (1)
++ *          returns TC_CRYPTO_FAIL (0) if s == NULL
++ *  @param s Sha256 state struct
++ */
++int tc_sha256_init(TCSha256State_t s);
++
++/**
++ *  @brief SHA256 update procedure
++ *  Hashes data_length bytes addressed by data into state s
++ *  @return returns TC_CRYPTO_SUCCESS (1)
++ *          returns TC_CRYPTO_FAIL (0) if:
++ *                s == NULL,
++ *                s->iv == NULL,
++ *                data == NULL
++ *  @note Assumes s has been initialized by tc_sha256_init
++ *  @warning The state buffer 'leftover' is left in memory after processing
++ *           If your application intends to have sensitive data in this
++ *           buffer, remind to erase it after the data has been processed
++ *  @param s Sha256 state struct
++ *  @param data message to hash
++ *  @param datalen length of message to hash
++ */
++int tc_sha256_update (TCSha256State_t s, const uint8_t *data, size_t datalen);
++
++/**
++ *  @brief SHA256 final procedure
++ *  Inserts the completed hash computation into digest
++ *  @return returns TC_CRYPTO_SUCCESS (1)
++ *          returns TC_CRYPTO_FAIL (0) if:
++ *                s == NULL,
++ *                s->iv == NULL,
++ *                digest == NULL
++ *  @note Assumes: s has been initialized by tc_sha256_init
++ *        digest points to at least TC_SHA256_DIGEST_SIZE bytes
++ *  @warning The state buffer 'leftover' is left in memory after processing
++ *           If your application intends to have sensitive data in this
++ *           buffer, remind to erase it after the data has been processed
++ *  @param digest unsigned eight bit integer
++ *  @param Sha256 state struct
++ */
++int tc_sha256_final(uint8_t *digest, TCSha256State_t s);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* __TC_SHA256_H__ */
+diff --git a/components/bt/common/tinycrypt/include/tinycrypt/utils.h b/components/bt/common/tinycrypt/include/tinycrypt/utils.h
+new file mode 100644
+index 000000000..18224c894
+--- /dev/null
++++ b/components/bt/common/tinycrypt/include/tinycrypt/utils.h
+@@ -0,0 +1,101 @@
++/*
++ * SPDX-FileCopyrightText: 2025 Espressif Systems (Shanghai) CO LTD
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++/* utils.h - TinyCrypt interface to platform-dependent run-time operations */
++
++/*
++ *  Copyright (C) 2017 by Intel Corporation, All Rights Reserved.
++ *
++ *  Redistribution and use in source and binary forms, with or without
++ *  modification, are permitted provided that the following conditions are met:
++ *
++ *    - Redistributions of source code must retain the above copyright notice,
++ *     this list of conditions and the following disclaimer.
++ *
++ *    - Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ *
++ *    - Neither the name of Intel Corporation nor the names of its contributors
++ *    may be used to endorse or promote products derived from this software
++ *    without specific prior written permission.
++ *
++ *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ *  AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ *  IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ *  ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++ *  LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ *  CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ *  SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ *  INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ *  CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ *  POSSIBILITY OF SUCH DAMAGE.
++ */
++
++/**
++ * @file
++ * @brief Interface to platform-dependent run-time operations.
++ *
++ */
++
++#ifndef __TC_UTILS_H__
++#define __TC_UTILS_H__
++
++#include <stdint.h>
++#include <stddef.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++/**
++ * @brief Copy the the buffer 'from' to the buffer 'to'.
++ * @return returns TC_CRYPTO_SUCCESS (1)
++ *         returns TC_CRYPTO_FAIL (0) if:
++ *                from_len > to_len.
++ *
++ * @param to OUT -- destination buffer
++ * @param to_len IN -- length of destination buffer
++ * @param from IN -- origin buffer
++ * @param from_len IN -- length of origin buffer
++ */
++unsigned int _copy(uint8_t *to, unsigned int to_len,
++	           const uint8_t *from, unsigned int from_len);
++
++/**
++ * @brief Set the value 'val' into the buffer 'to', 'len' times.
++ *
++ * @param to OUT -- destination buffer
++ * @param val IN -- value to be set in 'to'
++ * @param len IN -- number of times the value will be copied
++ */
++void _set(void *to, uint8_t val, unsigned int len);
++
++/*
++ * @brief AES specific doubling function, which utilizes
++ * the finite field used by AES.
++ * @return Returns a^2
++ *
++ * @param a IN/OUT -- value to be doubled
++ */
++uint8_t _double_byte(uint8_t a);
++
++/*
++ * @brief Constant-time algorithm to compare if two sequences of bytes are equal
++ * @return Returns 0 if equal, and non-zero otherwise
++ *
++ * @param a IN -- sequence of bytes a
++ * @param b IN -- sequence of bytes b
++ * @param size IN -- size of sequences a and b
++ */
++int _compare(const uint8_t *a, const uint8_t *b, size_t size);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* __TC_UTILS_H__ */
+diff --git a/components/bt/common/tinycrypt/src/ecc.c b/components/bt/common/tinycrypt/src/ecc.c
+new file mode 100644
+index 000000000..caa6b96a4
+--- /dev/null
++++ b/components/bt/common/tinycrypt/src/ecc.c
+@@ -0,0 +1,1073 @@
++/*
++ * SPDX-FileCopyrightText: 2025-2026 Espressif Systems (Shanghai) CO LTD
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++/*
++ * Copyright (c) 2014, Kenneth MacKay
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are met:
++ * * Redistributions of source code must retain the above copyright notice,
++ * this list of conditions and the following disclaimer.
++ * * Redistributions in binary form must reproduce the above copyright notice,
++ * this list of conditions and the following disclaimer in the documentation
++ * and/or other materials provided with the distribution.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
++ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
++ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
++ * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR
++ * ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
++ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
++ * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
++ * ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
++ * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++ *
++ *  Copyright (C) 2017 by Intel Corporation, All Rights Reserved.
++ *
++ *  Redistribution and use in source and binary forms, with or without
++ *  modification, are permitted provided that the following conditions are met:
++ *
++ *    - Redistributions of source code must retain the above copyright notice,
++ *     this list of conditions and the following disclaimer.
++ *
++ *    - Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ *
++ *    - Neither the name of Intel Corporation nor the names of its contributors
++ *    may be used to endorse or promote products derived from this software
++ *    without specific prior written permission.
++ *
++ *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ *  AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ *  IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ *  ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++ *  LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ *  CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ *  SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ *  INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ *  CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ *  POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#include <tinycrypt/ecc.h>
++#include <tinycrypt/ecc_platform_specific.h>
++#include <string.h>
++#include <stdio.h>
++
++#include "esp_tinycrypt_port.h"
++
++/* IMPORTANT: Make sure a cryptographically-secure PRNG is set and the platform
++ * has access to enough entropy in order to feed the PRNG regularly. */
++#if default_RNG_defined
++static uECC_RNG_Function g_rng_function = &default_CSPRNG;
++#else
++static uECC_RNG_Function g_rng_function = 0;
++#endif
++
++void uECC_set_rng(uECC_RNG_Function rng_function)
++{
++	g_rng_function = rng_function;
++}
++
++uECC_RNG_Function uECC_get_rng(void)
++{
++	return g_rng_function;
++}
++
++int uECC_curve_private_key_size(uECC_Curve curve)
++{
++	return BITS_TO_BYTES(curve->num_n_bits);
++}
++
++int uECC_curve_public_key_size(uECC_Curve curve)
++{
++	return 2 * curve->num_bytes;
++}
++
++void uECC_vli_clear(uECC_word_t *vli, wordcount_t num_words)
++{
++	wordcount_t i;
++	for (i = 0; i < num_words; ++i) {
++		 vli[i] = 0;
++	}
++}
++
++uECC_word_t uECC_vli_isZero(const uECC_word_t *vli, wordcount_t num_words)
++{
++	uECC_word_t bits = 0;
++	wordcount_t i;
++	for (i = 0; i < num_words; ++i) {
++		bits |= vli[i];
++	}
++	return (bits == 0);
++}
++
++uECC_word_t uECC_vli_testBit(const uECC_word_t *vli, bitcount_t bit)
++{
++	return (vli[bit >> uECC_WORD_BITS_SHIFT] &
++		((uECC_word_t)1 << (bit & uECC_WORD_BITS_MASK)));
++}
++
++/* Counts the number of words in vli. */
++static wordcount_t vli_numDigits(const uECC_word_t *vli,
++				 const wordcount_t max_words)
++{
++
++	wordcount_t i;
++	/* Search from the end until we find a non-zero digit. We do it in reverse
++	 * because we expect that most digits will be nonzero. */
++	for (i = max_words - 1; i >= 0 && vli[i] == 0; --i) {
++	}
++
++	return (i + 1);
++}
++
++bitcount_t uECC_vli_numBits(const uECC_word_t *vli,
++			    const wordcount_t max_words)
++{
++
++	uECC_word_t i;
++	uECC_word_t digit;
++
++	wordcount_t num_digits = vli_numDigits(vli, max_words);
++	if (num_digits == 0) {
++		return 0;
++	}
++
++	digit = vli[num_digits - 1];
++	for (i = 0; digit; ++i) {
++		digit >>= 1;
++	}
++
++	return (((bitcount_t)(num_digits - 1) << uECC_WORD_BITS_SHIFT) + i);
++}
++
++void uECC_vli_set(uECC_word_t *dest, const uECC_word_t *src,
++		  wordcount_t num_words)
++{
++	wordcount_t i;
++
++	for (i = 0; i < num_words; ++i) {
++		dest[i] = src[i];
++  	}
++}
++
++cmpresult_t uECC_vli_cmp_unsafe(const uECC_word_t *left,
++				const uECC_word_t *right,
++				wordcount_t num_words)
++{
++	wordcount_t i;
++
++	for (i = num_words - 1; i >= 0; --i) {
++		if (left[i] > right[i]) {
++			return 1;
++		} else if (left[i] < right[i]) {
++			return -1;
++		}
++	}
++	return 0;
++}
++
++uECC_word_t uECC_vli_equal(const uECC_word_t *left, const uECC_word_t *right,
++			   wordcount_t num_words)
++{
++
++	uECC_word_t diff = 0;
++	wordcount_t i;
++
++	for (i = num_words - 1; i >= 0; --i) {
++		diff |= (left[i] ^ right[i]);
++	}
++	return !(diff == 0);
++}
++
++uECC_word_t cond_set(uECC_word_t p_true, uECC_word_t p_false, unsigned int cond)
++{
++	return (p_true*(cond)) | (p_false*(!cond));
++}
++
++/* Computes result = left - right, returning borrow, in constant time.
++ * Can modify in place. */
++uECC_word_t uECC_vli_sub(uECC_word_t *result, const uECC_word_t *left,
++			 const uECC_word_t *right, wordcount_t num_words)
++{
++	uECC_word_t borrow = 0;
++	wordcount_t i;
++	for (i = 0; i < num_words; ++i) {
++		uECC_word_t diff = left[i] - right[i] - borrow;
++		uECC_word_t val = (diff > left[i]);
++		borrow = cond_set(val, borrow, (diff != left[i]));
++
++		result[i] = diff;
++	}
++	return borrow;
++}
++
++/* Computes result = left + right, returning carry, in constant time.
++ * Can modify in place. */
++static uECC_word_t uECC_vli_add(uECC_word_t *result, const uECC_word_t *left,
++				const uECC_word_t *right, wordcount_t num_words)
++{
++	uECC_word_t carry = 0;
++	wordcount_t i;
++	for (i = 0; i < num_words; ++i) {
++		uECC_word_t sum = left[i] + right[i] + carry;
++		uECC_word_t val = (sum < left[i]);
++		carry = cond_set(val, carry, (sum != left[i]));
++		result[i] = sum;
++	}
++	return carry;
++}
++
++cmpresult_t uECC_vli_cmp(const uECC_word_t *left, const uECC_word_t *right,
++			 wordcount_t num_words)
++{
++	uECC_word_t tmp[NUM_ECC_WORDS];
++	uECC_word_t neg = !!uECC_vli_sub(tmp, left, right, num_words);
++	uECC_word_t equal = uECC_vli_isZero(tmp, num_words);
++	return (!equal - 2 * neg);
++}
++
++/* Computes vli = vli >> 1. */
++static void uECC_vli_rshift1(uECC_word_t *vli, wordcount_t num_words)
++{
++	uECC_word_t *end = vli;
++	uECC_word_t carry = 0;
++
++	vli += num_words;
++	while (vli-- > end) {
++		uECC_word_t temp = *vli;
++		*vli = (temp >> 1) | carry;
++		carry = temp << (uECC_WORD_BITS - 1);
++	}
++}
++
++static void muladd(uECC_word_t a, uECC_word_t b, uECC_word_t *r0,
++		   uECC_word_t *r1, uECC_word_t *r2)
++{
++
++	uECC_dword_t p = (uECC_dword_t)a * b;
++	uECC_dword_t r01 = ((uECC_dword_t)(*r1) << uECC_WORD_BITS) | *r0;
++	r01 += p;
++	*r2 += (r01 < p);
++	*r1 = r01 >> uECC_WORD_BITS;
++	*r0 = (uECC_word_t)r01;
++
++}
++
++/* Computes result = left * right. Result must be 2 * num_words long. */
++static void uECC_vli_mult(uECC_word_t *result, const uECC_word_t *left,
++			  const uECC_word_t *right, wordcount_t num_words)
++{
++
++	uECC_word_t r0 = 0;
++	uECC_word_t r1 = 0;
++	uECC_word_t r2 = 0;
++	wordcount_t i, k;
++
++	/* Compute each digit of result in sequence, maintaining the carries. */
++	for (k = 0; k < num_words; ++k) {
++
++		for (i = 0; i <= k; ++i) {
++			muladd(left[i], right[k - i], &r0, &r1, &r2);
++		}
++
++		result[k] = r0;
++		r0 = r1;
++		r1 = r2;
++		r2 = 0;
++	}
++
++	for (k = num_words; k < num_words * 2 - 1; ++k) {
++
++		for (i = (k + 1) - num_words; i < num_words; ++i) {
++			muladd(left[i], right[k - i], &r0, &r1, &r2);
++		}
++		result[k] = r0;
++		r0 = r1;
++		r1 = r2;
++		r2 = 0;
++	}
++	result[num_words * 2 - 1] = r0;
++}
++
++void uECC_vli_modAdd(uECC_word_t *result, const uECC_word_t *left,
++		     const uECC_word_t *right, const uECC_word_t *mod,
++		     wordcount_t num_words)
++{
++	wordcount_t i;
++	uECC_word_t tmp[NUM_ECC_WORDS];
++
++	if (num_words <= 0 || num_words > NUM_ECC_WORDS) {
++		return;
++	}
++
++	uECC_word_t carry = uECC_vli_add(result, left, right, num_words);
++	uECC_word_t borrow = uECC_vli_sub(tmp, result, mod, num_words);
++	uECC_word_t do_reduce = (uECC_word_t)(carry || !borrow);
++
++	for (i = 0; i < num_words; ++i) {
++		result[i] = cond_set(tmp[i], result[i], do_reduce);
++	}
++}
++
++void uECC_vli_modSub(uECC_word_t *result, const uECC_word_t *left,
++		     const uECC_word_t *right, const uECC_word_t *mod,
++		     wordcount_t num_words)
++{
++	wordcount_t i;
++	uECC_word_t tmp[NUM_ECC_WORDS];
++
++	if (num_words <= 0 || num_words > NUM_ECC_WORDS) {
++		return;
++	}
++
++	uECC_word_t l_borrow = uECC_vli_sub(result, left, right, num_words);
++	uECC_vli_add(tmp, result, mod, num_words);
++	for (i = 0; i < num_words; ++i) {
++		result[i] = cond_set(tmp[i], result[i], l_borrow);
++	}
++}
++
++/* Computes result = product % mod, where product is 2N words long. */
++/* Currently only designed to work for curve_p or curve_n. */
++void uECC_vli_mmod(uECC_word_t *result, uECC_word_t *product,
++    		   const uECC_word_t *mod, wordcount_t num_words)
++{
++	uECC_word_t mod_multiple[2 * NUM_ECC_WORDS];
++	uECC_word_t tmp[2 * NUM_ECC_WORDS];
++	uECC_word_t *v[2] = {tmp, product};
++	uECC_word_t index;
++
++	if (num_words <= 0 || num_words > NUM_ECC_WORDS) {
++		return;
++	}
++
++	/* Shift mod so its highest set bit is at the maximum position. */
++	bitcount_t shift = (num_words * 2 * uECC_WORD_BITS) -
++			   uECC_vli_numBits(mod, num_words);
++	wordcount_t word_shift = shift / uECC_WORD_BITS;
++	wordcount_t bit_shift = shift % uECC_WORD_BITS;
++	uECC_word_t carry = 0;
++	uECC_vli_clear(mod_multiple, word_shift);
++	if (bit_shift > 0) {
++		for(index = 0; index < (uECC_word_t)num_words; ++index) {
++			mod_multiple[word_shift + index] = (mod[index] << bit_shift) | carry;
++			carry = mod[index] >> (uECC_WORD_BITS - bit_shift);
++		}
++	} else {
++		uECC_vli_set(mod_multiple + word_shift, mod, num_words);
++	}
++
++	for (index = 1; shift >= 0; --shift) {
++		uECC_word_t borrow = 0;
++		wordcount_t i;
++		for (i = 0; i < num_words * 2; ++i) {
++			uECC_word_t diff = v[index][i] - mod_multiple[i] - borrow;
++			uECC_word_t val = (diff > v[index][i]);
++			borrow = cond_set(val, borrow, (diff != v[index][i]));
++			v[1 - index][i] = diff;
++		}
++		/* Swap the index if there was no borrow */
++		index = !(index ^ borrow);
++		uECC_vli_rshift1(mod_multiple, num_words);
++		mod_multiple[num_words - 1] |= mod_multiple[num_words] <<
++					       (uECC_WORD_BITS - 1);
++		uECC_vli_rshift1(mod_multiple + num_words, num_words);
++	}
++	uECC_vli_set(result, v[index], num_words);
++}
++
++void uECC_vli_modMult(uECC_word_t *result, const uECC_word_t *left,
++		      const uECC_word_t *right, const uECC_word_t *mod,
++		      wordcount_t num_words)
++{
++	if (num_words <= 0 || num_words > NUM_ECC_WORDS) {
++		return;
++	}
++
++	uECC_word_t product[2 * NUM_ECC_WORDS];
++	uECC_vli_mult(product, left, right, num_words);
++	uECC_vli_mmod(result, product, mod, num_words);
++}
++
++void uECC_vli_modMult_fast(uECC_word_t *result, const uECC_word_t *left,
++			   const uECC_word_t *right, uECC_Curve curve)
++{
++	uECC_word_t product[2 * NUM_ECC_WORDS];
++	uECC_vli_mult(product, left, right, curve->num_words);
++
++	curve->mmod_fast(result, product);
++}
++
++static void uECC_vli_modSquare_fast(uECC_word_t *result,
++				    const uECC_word_t *left,
++				    uECC_Curve curve)
++{
++	uECC_vli_modMult_fast(result, left, left, curve);
++}
++
++
++#define EVEN(vli) (!(vli[0] & 1))
++
++static void vli_modInv_update(uECC_word_t *uv,
++			      const uECC_word_t *mod,
++			      wordcount_t num_words)
++{
++
++	uECC_word_t carry = 0;
++
++	if (!EVEN(uv)) {
++		carry = uECC_vli_add(uv, uv, mod, num_words);
++	}
++	uECC_vli_rshift1(uv, num_words);
++	if (carry) {
++		uv[num_words - 1] |= HIGH_BIT_SET;
++	}
++}
++
++void uECC_vli_modInv(uECC_word_t *result, const uECC_word_t *input,
++		     const uECC_word_t *mod, wordcount_t num_words)
++{
++	uECC_word_t a[NUM_ECC_WORDS], b[NUM_ECC_WORDS];
++	uECC_word_t u[NUM_ECC_WORDS], v[NUM_ECC_WORDS];
++	cmpresult_t cmpResult;
++
++	if (uECC_vli_isZero(input, num_words)) {
++		uECC_vli_clear(result, num_words);
++		return;
++	}
++
++	uECC_vli_set(a, input, num_words);
++	uECC_vli_set(b, mod, num_words);
++	uECC_vli_clear(u, num_words);
++	u[0] = 1;
++	uECC_vli_clear(v, num_words);
++	while ((cmpResult = uECC_vli_cmp_unsafe(a, b, num_words)) != 0) {
++		if (EVEN(a)) {
++			uECC_vli_rshift1(a, num_words);
++      			vli_modInv_update(u, mod, num_words);
++    		} else if (EVEN(b)) {
++			uECC_vli_rshift1(b, num_words);
++			vli_modInv_update(v, mod, num_words);
++		} else if (cmpResult > 0) {
++			uECC_vli_sub(a, a, b, num_words);
++			uECC_vli_rshift1(a, num_words);
++			if (uECC_vli_cmp_unsafe(u, v, num_words) < 0) {
++        			uECC_vli_add(u, u, mod, num_words);
++      			}
++      			uECC_vli_sub(u, u, v, num_words);
++      			vli_modInv_update(u, mod, num_words);
++    		} else {
++      			uECC_vli_sub(b, b, a, num_words);
++      			uECC_vli_rshift1(b, num_words);
++      			if (uECC_vli_cmp_unsafe(v, u, num_words) < 0) {
++        			uECC_vli_add(v, v, mod, num_words);
++      			}
++      			uECC_vli_sub(v, v, u, num_words);
++      			vli_modInv_update(v, mod, num_words);
++    		}
++  	}
++  	uECC_vli_set(result, u, num_words);
++}
++
++/* ------ Point operations ------ */
++
++void double_jacobian_default(uECC_word_t * X1, uECC_word_t * Y1,
++			     uECC_word_t * Z1, uECC_Curve curve)
++{
++	/* t1 = X, t2 = Y, t3 = Z */
++	uECC_word_t t4[NUM_ECC_WORDS];
++	uECC_word_t t5[NUM_ECC_WORDS];
++	wordcount_t num_words = curve->num_words;
++
++	if (uECC_vli_isZero(Z1, num_words)) {
++		return;
++	}
++
++	uECC_vli_modSquare_fast(t4, Y1, curve);   /* t4 = y1^2 */
++	uECC_vli_modMult_fast(t5, X1, t4, curve); /* t5 = x1*y1^2 = A */
++	uECC_vli_modSquare_fast(t4, t4, curve);   /* t4 = y1^4 */
++	uECC_vli_modMult_fast(Y1, Y1, Z1, curve); /* t2 = y1*z1 = z3 */
++	uECC_vli_modSquare_fast(Z1, Z1, curve);   /* t3 = z1^2 */
++
++	uECC_vli_modAdd(X1, X1, Z1, curve->p, num_words); /* t1 = x1 + z1^2 */
++	uECC_vli_modAdd(Z1, Z1, Z1, curve->p, num_words); /* t3 = 2*z1^2 */
++	uECC_vli_modSub(Z1, X1, Z1, curve->p, num_words); /* t3 = x1 - z1^2 */
++	uECC_vli_modMult_fast(X1, X1, Z1, curve); /* t1 = x1^2 - z1^4 */
++
++	uECC_vli_modAdd(Z1, X1, X1, curve->p, num_words); /* t3 = 2*(x1^2 - z1^4) */
++	uECC_vli_modAdd(X1, X1, Z1, curve->p, num_words); /* t1 = 3*(x1^2 - z1^4) */
++	if (uECC_vli_testBit(X1, 0)) {
++		uECC_word_t l_carry = uECC_vli_add(X1, X1, curve->p, num_words);
++		uECC_vli_rshift1(X1, num_words);
++		X1[num_words - 1] |= l_carry << (uECC_WORD_BITS - 1);
++	} else {
++		uECC_vli_rshift1(X1, num_words);
++	}
++
++	/* t1 = 3/2*(x1^2 - z1^4) = B */
++	uECC_vli_modSquare_fast(Z1, X1, curve); /* t3 = B^2 */
++	uECC_vli_modSub(Z1, Z1, t5, curve->p, num_words); /* t3 = B^2 - A */
++	uECC_vli_modSub(Z1, Z1, t5, curve->p, num_words); /* t3 = B^2 - 2A = x3 */
++	uECC_vli_modSub(t5, t5, Z1, curve->p, num_words); /* t5 = A - x3 */
++	uECC_vli_modMult_fast(X1, X1, t5, curve); /* t1 = B * (A - x3) */
++	/* t4 = B * (A - x3) - y1^4 = y3: */
++	uECC_vli_modSub(t4, X1, t4, curve->p, num_words);
++
++	uECC_vli_set(X1, Z1, num_words);
++	uECC_vli_set(Z1, Y1, num_words);
++	uECC_vli_set(Y1, t4, num_words);
++}
++
++void x_side_default(uECC_word_t *result,
++		    const uECC_word_t *x,
++		    uECC_Curve curve)
++{
++	uECC_word_t _3[NUM_ECC_WORDS] = {3}; /* -a = 3 */
++	wordcount_t num_words = curve->num_words;
++
++	uECC_vli_modSquare_fast(result, x, curve); /* r = x^2 */
++	uECC_vli_modSub(result, result, _3, curve->p, num_words); /* r = x^2 - 3 */
++	uECC_vli_modMult_fast(result, result, x, curve); /* r = x^3 - 3x */
++	/* r = x^3 - 3x + b: */
++	uECC_vli_modAdd(result, result, curve->b, curve->p, num_words);
++}
++
++#if uECC_SUPPORTS_secp192r1
++uECC_Curve uECC_secp192r1(void)
++{
++    return &curve_secp192r1;
++}
++
++void vli_mmod_fast_secp192r1(unsigned int *result, unsigned int *product)
++{
++    unsigned int tmp[NUM_ECC_WORDS_SECP192R1];
++    int carry;
++
++    uECC_vli_set(result, product, NUM_ECC_WORDS_SECP192R1);
++
++    uECC_vli_set(tmp, &product[6], NUM_ECC_WORDS_SECP192R1);
++    carry = uECC_vli_add(result, result, tmp, NUM_ECC_WORDS_SECP192R1);
++
++    tmp[0] = tmp[1] = 0;
++    tmp[2] = product[6];
++    tmp[3] = product[7];
++    tmp[4] = product[8];
++    tmp[5] = product[9];
++    carry += uECC_vli_add(result, result, tmp, NUM_ECC_WORDS_SECP192R1);
++
++    tmp[0] = tmp[2] = product[10];
++    tmp[1] = tmp[3] = product[11];
++    tmp[4] = tmp[5] = 0;
++    carry += uECC_vli_add(result, result, tmp, NUM_ECC_WORDS_SECP192R1);
++
++    while (carry || uECC_vli_cmp_unsafe(curve_secp192r1.p, result, NUM_ECC_WORDS_SECP192R1) != 1) {
++        carry -= uECC_vli_sub(result, result, curve_secp192r1.p, NUM_ECC_WORDS_SECP192R1);
++    }
++}
++#endif /* uECC_SUPPORTS_secp192r1 */
++
++
++uECC_Curve uECC_secp256r1(void)
++{
++	return &curve_secp256r1;
++}
++
++void vli_mmod_fast_secp256r1(unsigned int *result, unsigned int*product)
++{
++	unsigned int tmp[NUM_ECC_WORDS];
++	int carry;
++
++	/* t */
++	uECC_vli_set(result, product, NUM_ECC_WORDS);
++
++	/* s1 */
++	tmp[0] = tmp[1] = tmp[2] = 0;
++	tmp[3] = product[11];
++	tmp[4] = product[12];
++	tmp[5] = product[13];
++	tmp[6] = product[14];
++	tmp[7] = product[15];
++	carry = uECC_vli_add(tmp, tmp, tmp, NUM_ECC_WORDS);
++	carry += uECC_vli_add(result, result, tmp, NUM_ECC_WORDS);
++
++	/* s2 */
++	tmp[3] = product[12];
++	tmp[4] = product[13];
++	tmp[5] = product[14];
++	tmp[6] = product[15];
++	tmp[7] = 0;
++	carry += uECC_vli_add(tmp, tmp, tmp, NUM_ECC_WORDS);
++	carry += uECC_vli_add(result, result, tmp, NUM_ECC_WORDS);
++
++	/* s3 */
++	tmp[0] = product[8];
++	tmp[1] = product[9];
++	tmp[2] = product[10];
++	tmp[3] = tmp[4] = tmp[5] = 0;
++	tmp[6] = product[14];
++	tmp[7] = product[15];
++  	carry += uECC_vli_add(result, result, tmp, NUM_ECC_WORDS);
++
++	/* s4 */
++	tmp[0] = product[9];
++	tmp[1] = product[10];
++	tmp[2] = product[11];
++	tmp[3] = product[13];
++	tmp[4] = product[14];
++	tmp[5] = product[15];
++	tmp[6] = product[13];
++	tmp[7] = product[8];
++	carry += uECC_vli_add(result, result, tmp, NUM_ECC_WORDS);
++
++	/* d1 */
++	tmp[0] = product[11];
++	tmp[1] = product[12];
++	tmp[2] = product[13];
++	tmp[3] = tmp[4] = tmp[5] = 0;
++	tmp[6] = product[8];
++	tmp[7] = product[10];
++	carry -= uECC_vli_sub(result, result, tmp, NUM_ECC_WORDS);
++
++	/* d2 */
++	tmp[0] = product[12];
++	tmp[1] = product[13];
++	tmp[2] = product[14];
++	tmp[3] = product[15];
++	tmp[4] = tmp[5] = 0;
++	tmp[6] = product[9];
++	tmp[7] = product[11];
++	carry -= uECC_vli_sub(result, result, tmp, NUM_ECC_WORDS);
++
++	/* d3 */
++	tmp[0] = product[13];
++	tmp[1] = product[14];
++	tmp[2] = product[15];
++	tmp[3] = product[8];
++	tmp[4] = product[9];
++	tmp[5] = product[10];
++	tmp[6] = 0;
++	tmp[7] = product[12];
++	carry -= uECC_vli_sub(result, result, tmp, NUM_ECC_WORDS);
++
++	/* d4 */
++	tmp[0] = product[14];
++	tmp[1] = product[15];
++	tmp[2] = 0;
++	tmp[3] = product[9];
++	tmp[4] = product[10];
++	tmp[5] = product[11];
++	tmp[6] = 0;
++	tmp[7] = product[13];
++	carry -= uECC_vli_sub(result, result, tmp, NUM_ECC_WORDS);
++
++	if (carry < 0) {
++		do {
++			carry += uECC_vli_add(result, result, curve_secp256r1.p, NUM_ECC_WORDS);
++		}
++		while (carry < 0);
++	} else  {
++		while (carry ||
++		       uECC_vli_cmp_unsafe(curve_secp256r1.p, result, NUM_ECC_WORDS) != 1) {
++			carry -= uECC_vli_sub(result, result, curve_secp256r1.p, NUM_ECC_WORDS);
++		}
++	}
++}
++
++uECC_word_t EccPoint_isZero(const uECC_word_t *point, uECC_Curve curve)
++{
++	return uECC_vli_isZero(point, curve->num_words * 2);
++}
++
++void apply_z(uECC_word_t * X1, uECC_word_t * Y1, const uECC_word_t * const Z,
++	     uECC_Curve curve)
++{
++	uECC_word_t t1[NUM_ECC_WORDS];
++
++	uECC_vli_modSquare_fast(t1, Z, curve);    /* z^2 */
++	uECC_vli_modMult_fast(X1, X1, t1, curve); /* x1 * z^2 */
++	uECC_vli_modMult_fast(t1, t1, Z, curve);  /* z^3 */
++	uECC_vli_modMult_fast(Y1, Y1, t1, curve); /* y1 * z^3 */
++}
++
++/* P = (x1, y1) => 2P, (x2, y2) => P' */
++static void XYcZ_initial_double(uECC_word_t * X1, uECC_word_t * Y1,
++				uECC_word_t * X2, uECC_word_t * Y2,
++				const uECC_word_t * const initial_Z,
++				uECC_Curve curve)
++{
++	uECC_word_t z[NUM_ECC_WORDS];
++	wordcount_t num_words = curve->num_words;
++	if (initial_Z) {
++		uECC_vli_set(z, initial_Z, num_words);
++	} else {
++		uECC_vli_clear(z, num_words);
++		z[0] = 1;
++	}
++
++	uECC_vli_set(X2, X1, num_words);
++	uECC_vli_set(Y2, Y1, num_words);
++
++	apply_z(X1, Y1, z, curve);
++	curve->double_jacobian(X1, Y1, z, curve);
++	apply_z(X2, Y2, z, curve);
++}
++
++
++/* Input P = (x1, y1, Z), Q = (x2, y2, Z)
++   Output P + Q = (x3, y3, Z3), P - Q = (x3', y3', Z3)
++   or P => P - Q, Q => P + Q
++ */
++static void XYcZ_addC(uECC_word_t * X1, uECC_word_t * Y1,
++		      uECC_word_t * X2, uECC_word_t * Y2,
++		      uECC_Curve curve)
++{
++	/* t1 = X1, t2 = Y1, t3 = X2, t4 = Y2 */
++	uECC_word_t t5[NUM_ECC_WORDS] = {0};
++	uECC_word_t t6[NUM_ECC_WORDS];
++	uECC_word_t t7[NUM_ECC_WORDS];
++	wordcount_t num_words = curve->num_words;
++
++	uECC_vli_modSub(t5, X2, X1, curve->p, num_words); /* t5 = x2 - x1 */
++	uECC_vli_modSquare_fast(t5, t5, curve); /* t5 = (x2 - x1)^2 = A */
++	uECC_vli_modMult_fast(X1, X1, t5, curve); /* t1 = x1*A = B */
++	uECC_vli_modMult_fast(X2, X2, t5, curve); /* t3 = x2*A = C */
++	uECC_vli_modAdd(t5, Y2, Y1, curve->p, num_words); /* t5 = y2 + y1 */
++	uECC_vli_modSub(Y2, Y2, Y1, curve->p, num_words); /* t4 = y2 - y1 */
++
++	uECC_vli_modSub(t6, X2, X1, curve->p, num_words); /* t6 = C - B */
++	uECC_vli_modMult_fast(Y1, Y1, t6, curve); /* t2 = y1 * (C - B) = E */
++	uECC_vli_modAdd(t6, X1, X2, curve->p, num_words); /* t6 = B + C */
++	uECC_vli_modSquare_fast(X2, Y2, curve); /* t3 = (y2 - y1)^2 = D */
++	uECC_vli_modSub(X2, X2, t6, curve->p, num_words); /* t3 = D - (B + C) = x3 */
++
++	uECC_vli_modSub(t7, X1, X2, curve->p, num_words); /* t7 = B - x3 */
++	uECC_vli_modMult_fast(Y2, Y2, t7, curve); /* t4 = (y2 - y1)*(B - x3) */
++	/* t4 = (y2 - y1)*(B - x3) - E = y3: */
++	uECC_vli_modSub(Y2, Y2, Y1, curve->p, num_words);
++
++	uECC_vli_modSquare_fast(t7, t5, curve); /* t7 = (y2 + y1)^2 = F */
++	uECC_vli_modSub(t7, t7, t6, curve->p, num_words); /* t7 = F - (B + C) = x3' */
++	uECC_vli_modSub(t6, t7, X1, curve->p, num_words); /* t6 = x3' - B */
++	uECC_vli_modMult_fast(t6, t6, t5, curve); /* t6 = (y2+y1)*(x3' - B) */
++	/* t2 = (y2+y1)*(x3' - B) - E = y3': */
++	uECC_vli_modSub(Y1, t6, Y1, curve->p, num_words);
++
++	uECC_vli_set(X1, t7, num_words);
++}
++
++void XYcZ_add(uECC_word_t * X1, uECC_word_t * Y1,
++	      uECC_word_t * X2, uECC_word_t * Y2,
++	      uECC_Curve curve)
++{
++	/* t1 = X1, t2 = Y1, t3 = X2, t4 = Y2 */
++	uECC_word_t t5[NUM_ECC_WORDS] = {0};
++	wordcount_t num_words = curve->num_words;
++
++	uECC_vli_modSub(t5, X2, X1, curve->p, num_words); /* t5 = x2 - x1 */
++	uECC_vli_modSquare_fast(t5, t5, curve); /* t5 = (x2 - x1)^2 = A */
++	uECC_vli_modMult_fast(X1, X1, t5, curve); /* t1 = x1*A = B */
++	uECC_vli_modMult_fast(X2, X2, t5, curve); /* t3 = x2*A = C */
++	uECC_vli_modSub(Y2, Y2, Y1, curve->p, num_words); /* t4 = y2 - y1 */
++	uECC_vli_modSquare_fast(t5, Y2, curve); /* t5 = (y2 - y1)^2 = D */
++
++	uECC_vli_modSub(t5, t5, X1, curve->p, num_words); /* t5 = D - B */
++	uECC_vli_modSub(t5, t5, X2, curve->p, num_words); /* t5 = D - B - C = x3 */
++	uECC_vli_modSub(X2, X2, X1, curve->p, num_words); /* t3 = C - B */
++	uECC_vli_modMult_fast(Y1, Y1, X2, curve); /* t2 = y1*(C - B) */
++	uECC_vli_modSub(X2, X1, t5, curve->p, num_words); /* t3 = B - x3 */
++	uECC_vli_modMult_fast(Y2, Y2, X2, curve); /* t4 = (y2 - y1)*(B - x3) */
++	uECC_vli_modSub(Y2, Y2, Y1, curve->p, num_words); /* t4 = y3 */
++
++	uECC_vli_set(X2, t5, num_words);
++}
++
++void EccPoint_mult(uECC_word_t * result, const uECC_word_t * point,
++		   const uECC_word_t * scalar,
++		   const uECC_word_t * initial_Z,
++		   bitcount_t num_bits, uECC_Curve curve)
++{
++#if SOC_ECC_SUPPORTED
++	wordcount_t num_words = curve->num_words;
++
++	/*
++	 * The ECC peripheral accepts canonical scalars only.  Calls using the
++	 * regularized software scalar use one additional bit and must stay on
++	 * the software ladder.
++	 */
++	if (initial_Z == 0 && num_bits == curve->num_n_bits &&
++	    (curve == uECC_secp256r1()
++#if uECC_SUPPORTS_secp192r1
++	     || curve == uECC_secp192r1()
++#endif /* uECC_SUPPORTS_secp192r1 */
++	    )) {
++		if (esp_tinycrypt_calc_ecc_mult(point, point + num_words, scalar,
++						result, result + num_words,
++						num_words * uECC_WORD_SIZE, false) == 0) {
++			return;
++		}
++	}
++#endif /* SOC_ECC_SUPPORTED */
++	{
++	/* R0 and R1 */
++	uECC_word_t Rx[2][NUM_ECC_WORDS];
++	uECC_word_t Ry[2][NUM_ECC_WORDS];
++	uECC_word_t z[NUM_ECC_WORDS];
++	bitcount_t i;
++	uECC_word_t nb;
++	wordcount_t num_words = curve->num_words;
++
++	uECC_vli_set(Rx[1], point, num_words);
++  	uECC_vli_set(Ry[1], point + num_words, num_words);
++
++	XYcZ_initial_double(Rx[1], Ry[1], Rx[0], Ry[0], initial_Z, curve);
++
++	for (i = num_bits - 2; i > 0; --i) {
++		nb = !uECC_vli_testBit(scalar, i);
++		XYcZ_addC(Rx[1 - nb], Ry[1 - nb], Rx[nb], Ry[nb], curve);
++		XYcZ_add(Rx[nb], Ry[nb], Rx[1 - nb], Ry[1 - nb], curve);
++	}
++
++	nb = !uECC_vli_testBit(scalar, 0);
++	XYcZ_addC(Rx[1 - nb], Ry[1 - nb], Rx[nb], Ry[nb], curve);
++
++	/* Find final 1/Z value. */
++	uECC_vli_modSub(z, Rx[1], Rx[0], curve->p, num_words); /* X1 - X0 */
++	uECC_vli_modMult_fast(z, z, Ry[1 - nb], curve); /* Yb * (X1 - X0) */
++	uECC_vli_modMult_fast(z, z, point, curve); /* xP * Yb * (X1 - X0) */
++	uECC_vli_modInv(z, z, curve->p, num_words); /* 1 / (xP * Yb * (X1 - X0))*/
++	/* yP / (xP * Yb * (X1 - X0)) */
++	uECC_vli_modMult_fast(z, z, point + num_words, curve);
++	/* Xb * yP / (xP * Yb * (X1 - X0)) */
++	uECC_vli_modMult_fast(z, z, Rx[1 - nb], curve);
++	/* End 1/Z calculation */
++
++	XYcZ_add(Rx[nb], Ry[nb], Rx[1 - nb], Ry[1 - nb], curve);
++	apply_z(Rx[0], Ry[0], z, curve);
++
++	uECC_vli_set(result, Rx[0], num_words);
++	uECC_vli_set(result + num_words, Ry[0], num_words);
++	}
++}
++
++uECC_word_t regularize_k(const uECC_word_t * const k, uECC_word_t *k0,
++			 uECC_word_t *k1, uECC_Curve curve)
++{
++
++	wordcount_t num_n_words = BITS_TO_WORDS(curve->num_n_bits);
++
++	bitcount_t num_n_bits = curve->num_n_bits;
++	uECC_word_t carry;
++	uECC_word_t bit = 0;
++	bitcount_t max_n_bits;
++
++	if (num_n_words <= 0 || num_n_words > NUM_ECC_WORDS) {
++		return 0;
++	}
++
++	max_n_bits = (bitcount_t)num_n_words * uECC_WORD_SIZE * 8;
++	carry = uECC_vli_add(k0, k, curve->n, num_n_words);
++
++	if (num_n_bits < max_n_bits) {
++		bit = (uECC_vli_testBit(k0, num_n_bits) != 0);
++	}
++
++	carry |= bit;
++
++	uECC_vli_add(k1, k0, curve->n, num_n_words);
++
++	return carry;
++}
++
++uECC_word_t EccPoint_compute_public_key(uECC_word_t *result,
++					uECC_word_t *private_key,
++					uECC_Curve curve)
++{
++#if SOC_ECC_SUPPORTED
++	/*
++	 * The ECC peripheral requires a canonical scalar.  regularize_k()
++	 * produces k + n or k + 2n for the software constant-time ladder,
++	 * which is mathematically equivalent but outside the HW input range.
++	 */
++	if (curve == uECC_secp256r1()
++#if uECC_SUPPORTS_secp192r1
++	    || curve == uECC_secp192r1()
++#endif /* uECC_SUPPORTS_secp192r1 */
++	   ) {
++		EccPoint_mult(result, curve->G, private_key, 0,
++			      curve->num_n_bits, curve);
++		return !EccPoint_isZero(result, curve);
++	}
++#endif /* SOC_ECC_SUPPORTED */
++
++	uECC_word_t tmp1[NUM_ECC_WORDS];
++	uECC_word_t tmp2[NUM_ECC_WORDS];
++	uECC_word_t *p2[2] = {tmp1, tmp2};
++	uECC_word_t carry;
++
++	/* Regularize the bitcount for the private key so that attackers cannot
++	 * use a side channel attack to learn the number of leading zeros. */
++	carry = regularize_k(private_key, tmp1, tmp2, curve);
++
++	EccPoint_mult(result, curve->G, p2[!carry], 0, curve->num_n_bits + 1, curve);
++
++	if (EccPoint_isZero(result, curve)) {
++		return 0;
++	}
++	return 1;
++}
++
++/* Converts an integer in uECC native format to big-endian bytes. */
++void uECC_vli_nativeToBytes(uint8_t *bytes, int num_bytes,
++			    const unsigned int *native)
++{
++	wordcount_t i;
++	for (i = 0; i < num_bytes; ++i) {
++		unsigned b = num_bytes - 1 - i;
++		bytes[i] = native[b / uECC_WORD_SIZE] >> (8 * (b % uECC_WORD_SIZE));
++	}
++}
++
++/* Converts big-endian bytes to an integer in uECC native format. */
++void uECC_vli_bytesToNative(unsigned int *native, const uint8_t *bytes,
++			    int num_bytes)
++{
++	wordcount_t i;
++	uECC_vli_clear(native, (num_bytes + (uECC_WORD_SIZE - 1)) / uECC_WORD_SIZE);
++	for (i = 0; i < num_bytes; ++i) {
++		unsigned b = num_bytes - 1 - i;
++		native[b / uECC_WORD_SIZE] |=
++			(uECC_word_t)bytes[i] << (8 * (b % uECC_WORD_SIZE));
++  	}
++}
++
++int uECC_generate_random_int(uECC_word_t *random, const uECC_word_t *top,
++			     wordcount_t num_words)
++{
++	uECC_word_t mask = (uECC_word_t)-1;
++	uECC_word_t tries;
++	bitcount_t num_bits = uECC_vli_numBits(top, num_words);
++
++	if (!g_rng_function || num_words <= 0 || num_words > NUM_ECC_WORDS) {
++		return 0;
++	}
++
++	for (tries = 0; tries < uECC_RNG_MAX_TRIES; ++tries) {
++		if (!g_rng_function((uint8_t *)random, num_words * uECC_WORD_SIZE)) {
++      			return 0;
++    		}
++		random[num_words - 1] &=
++        		mask >> ((bitcount_t)(num_words * uECC_WORD_SIZE * 8 - num_bits));
++		if (!uECC_vli_isZero(random, num_words) &&
++			uECC_vli_cmp(top, random, num_words) == 1) {
++			return 1;
++		}
++	}
++	return 0;
++}
++
++
++int uECC_valid_point(const uECC_word_t *point, uECC_Curve curve)
++{
++	wordcount_t num_words = curve->num_words;
++
++	/* The point at infinity is invalid. */
++	if (EccPoint_isZero(point, curve)) {
++		return -1;
++	}
++
++	/* x and y must be smaller than p. */
++	if (uECC_vli_cmp_unsafe(curve->p, point, num_words) != 1 ||
++		uECC_vli_cmp_unsafe(curve->p, point + num_words, num_words) != 1) {
++		return -2;
++	}
++
++#if SOC_ECC_SUPPORTED
++	if (curve == uECC_secp256r1()
++#if uECC_SUPPORTS_secp192r1
++	    || curve == uECC_secp192r1()
++#endif /* uECC_SUPPORTS_secp192r1 */
++	   ) {
++		if (esp_tinycrypt_verify_ecc_point((const uint8_t *)&point[0],
++						   (const uint8_t *)&point[num_words],
++						   num_words * uECC_WORD_SIZE) == 0) {
++			return 0;
++		}
++	}
++#endif /* SOC_ECC_SUPPORTED */
++	{
++	uECC_word_t tmp1[NUM_ECC_WORDS];
++	uECC_word_t tmp2[NUM_ECC_WORDS];
++
++	uECC_vli_modSquare_fast(tmp1, point + num_words, curve);
++	curve->x_side(tmp2, point, curve); /* tmp2 = x^3 + ax + b */
++
++	/* Make sure that y^2 == x^3 + ax + b */
++	if (uECC_vli_equal(tmp1, tmp2, num_words) != 0) {
++		return -3;
++	}
++	}
++
++	return 0;
++}
++
++int uECC_valid_public_key(const uint8_t *public_key, uECC_Curve curve)
++{
++	uECC_word_t _public[NUM_ECC_WORDS * 2];
++	wordcount_t num_point_words = curve->num_words * 2;
++
++	uECC_vli_clear(_public, NUM_ECC_WORDS * 2);
++	uECC_vli_bytesToNative(_public, public_key, curve->num_bytes);
++	uECC_vli_bytesToNative(
++	_public + curve->num_words,
++	public_key + curve->num_bytes,
++	curve->num_bytes);
++
++	if (uECC_vli_cmp_unsafe(_public, curve->G, num_point_words) == 0) {
++		return -4;
++	}
++
++	return uECC_valid_point(_public, curve);
++}
++
++int uECC_compute_public_key(const uint8_t *private_key, uint8_t *public_key,
++			    uECC_Curve curve)
++{
++	uECC_word_t _private[NUM_ECC_WORDS];
++	uECC_word_t _public[NUM_ECC_WORDS * 2];
++
++	uECC_vli_clear(_private, NUM_ECC_WORDS);
++	uECC_vli_clear(_public, NUM_ECC_WORDS * 2);
++	uECC_vli_bytesToNative(
++	_private,
++	private_key,
++	BITS_TO_BYTES(curve->num_n_bits));
++
++	/* Make sure the private key is in the range [1, n-1]. */
++	if (uECC_vli_isZero(_private, BITS_TO_WORDS(curve->num_n_bits))) {
++		return 0;
++	}
++
++	if (uECC_vli_cmp(curve->n, _private, BITS_TO_WORDS(curve->num_n_bits)) != 1) {
++		return 0;
++	}
++
++	/* Compute public key. */
++	if (!EccPoint_compute_public_key(_public, _private, curve)) {
++		return 0;
++	}
++
++	uECC_vli_nativeToBytes(public_key, curve->num_bytes, _public);
++	uECC_vli_nativeToBytes(
++	public_key +
++	curve->num_bytes, curve->num_bytes, _public + curve->num_words);
++	return 1;
++}
+diff --git a/components/bt/common/tinycrypt/src/ecc_dh.c b/components/bt/common/tinycrypt/src/ecc_dh.c
+new file mode 100644
+index 000000000..d740a429e
+--- /dev/null
++++ b/components/bt/common/tinycrypt/src/ecc_dh.c
+@@ -0,0 +1,204 @@
++/*
++ * SPDX-FileCopyrightText: 2025-2026 Espressif Systems (Shanghai) CO LTD
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++/*
++ * Copyright (c) 2014, Kenneth MacKay
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are met:
++ *  * Redistributions of source code must retain the above copyright notice,
++ *    this list of conditions and the following disclaimer.
++ *  * Redistributions in binary form must reproduce the above copyright notice,
++ *    this list of conditions and the following disclaimer in the documentation
++ *    and/or other materials provided with the distribution.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ */
++
++/*
++ *  Copyright (C) 2017 by Intel Corporation, All Rights Reserved.
++ *
++ *  Redistribution and use in source and binary forms, with or without
++ *  modification, are permitted provided that the following conditions are met:
++ *
++ *    - Redistributions of source code must retain the above copyright notice,
++ *     this list of conditions and the following disclaimer.
++ *
++ *    - Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ *
++ *    - Neither the name of Intel Corporation nor the names of its contributors
++ *    may be used to endorse or promote products derived from this software
++ *    without specific prior written permission.
++ *
++ *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ *  AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ *  IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ *  ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++ *  LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ *  CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ *  SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ *  INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ *  CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ *  POSSIBILITY OF SUCH DAMAGE.
++ */
++#include <tinycrypt/constants.h>
++#include <tinycrypt/ecc.h>
++#include <tinycrypt/ecc_dh.h>
++#include <string.h>
++
++int uECC_make_key_with_d(uint8_t *public_key, uint8_t *private_key,
++			 unsigned int *d, uECC_Curve curve)
++{
++
++	uECC_word_t _private[NUM_ECC_WORDS];
++	uECC_word_t _public[NUM_ECC_WORDS * 2];
++
++	/* This function is designed for test purposes-only (such as validating NIST
++	 * test vectors) as it uses a provided value for d instead of generating
++	 * it uniformly at random. */
++	memcpy (_private, d, NUM_ECC_BYTES);
++
++	/* Computing public-key from private: */
++	if (EccPoint_compute_public_key(_public, _private, curve)) {
++
++		/* Converting buffers to correct bit order: */
++		uECC_vli_nativeToBytes(private_key,
++				       BITS_TO_BYTES(curve->num_n_bits),
++				       _private);
++		uECC_vli_nativeToBytes(public_key,
++				       curve->num_bytes,
++				       _public);
++		uECC_vli_nativeToBytes(public_key + curve->num_bytes,
++				       curve->num_bytes,
++				       _public + curve->num_words);
++
++		/* erasing temporary buffer used to store secret: */
++		memset(_private, 0, NUM_ECC_BYTES);
++
++		return 1;
++	}
++	return 0;
++}
++
++int uECC_make_key(uint8_t *public_key, uint8_t *private_key, uECC_Curve curve)
++{
++
++	uECC_word_t _random[NUM_ECC_WORDS * 2];
++	uECC_word_t _private[NUM_ECC_WORDS];
++	uECC_word_t _public[NUM_ECC_WORDS * 2];
++	uECC_word_t tries;
++
++	for (tries = 0; tries < uECC_RNG_MAX_TRIES; ++tries) {
++		/* Generating _private uniformly at random: */
++		uECC_RNG_Function rng_function = uECC_get_rng();
++		if (!rng_function ||
++			!rng_function((uint8_t *)_random, 2 * NUM_ECC_WORDS*uECC_WORD_SIZE)) {
++        		return 0;
++		}
++
++		/* computing modular reduction of _random (see FIPS 186.4 B.4.1): */
++		uECC_vli_mmod(_private, _random, curve->n, BITS_TO_WORDS(curve->num_n_bits));
++
++		/* Computing public-key from private: */
++		if (EccPoint_compute_public_key(_public, _private, curve)) {
++
++			/* Converting buffers to correct bit order: */
++			uECC_vli_nativeToBytes(private_key,
++					       BITS_TO_BYTES(curve->num_n_bits),
++					       _private);
++			uECC_vli_nativeToBytes(public_key,
++					       curve->num_bytes,
++					       _public);
++			uECC_vli_nativeToBytes(public_key + curve->num_bytes,
++ 					       curve->num_bytes,
++					       _public + curve->num_words);
++
++			/* erasing temporary buffer that stored secret: */
++			memset(_private, 0, NUM_ECC_BYTES);
++
++      			return 1;
++    		}
++  	}
++	return 0;
++}
++
++int uECC_shared_secret(const uint8_t *public_key, const uint8_t *private_key,
++		       uint8_t *secret, uECC_Curve curve)
++{
++
++	uECC_word_t _public[NUM_ECC_WORDS * 2];
++	uECC_word_t _private[NUM_ECC_WORDS];
++
++	uECC_word_t tmp[NUM_ECC_WORDS];
++	uECC_word_t *p2[2] = {_private, tmp};
++	uECC_word_t *initial_Z = 0;
++	uECC_word_t carry;
++	wordcount_t num_words = curve->num_words;
++	wordcount_t num_bytes = curve->num_bytes;
++	int r;
++
++	/* Converting buffers to correct bit order: */
++	uECC_vli_bytesToNative(_private,
++      			       private_key,
++			       BITS_TO_BYTES(curve->num_n_bits));
++	uECC_vli_bytesToNative(_public,
++      			       public_key,
++			       num_bytes);
++	uECC_vli_bytesToNative(_public + num_words,
++			       public_key + num_bytes,
++			       num_bytes);
++
++	/*
++	 * Use the software ladder for ECDH.  Its regularized scalar is unsuitable
++	 * for the ECC peripheral, and EccPoint_mult() can otherwise silently fall
++	 * back to the software ladder with an unregularized scalar.
++	 */
++	carry = regularize_k(_private, _private, tmp, curve);
++
++	/* If an RNG function was specified, try to get a random initial Z value to
++	 * improve protection against side-channel attacks. */
++	uECC_RNG_Function rng_function = uECC_get_rng();
++	if (rng_function) {
++		if (!uECC_generate_random_int(p2[carry], curve->p, num_words)) {
++			r = 0;
++			goto clear_and_out;
++    		}
++    		initial_Z = p2[carry];
++  	}
++
++	EccPoint_mult(_public, _public, p2[!carry], initial_Z, curve->num_n_bits + 1,
++		      curve);
++
++	uECC_vli_nativeToBytes(secret, num_bytes, _public);
++	r = !EccPoint_isZero(_public, curve);
++
++clear_and_out:
++	/* erasing temporary buffer used to store secret: */
++	memset(p2, 0, sizeof(p2));
++	__asm__ __volatile__("" :: "g"(p2) : "memory");
++	memset(_public, 0, sizeof(_public));
++	__asm__ __volatile__("" :: "g"(_public) : "memory");
++	memset(tmp, 0, sizeof(tmp));
++	__asm__ __volatile__("" :: "g"(tmp) : "memory");
++	memset(_private, 0, sizeof(_private));
++	__asm__ __volatile__("" :: "g"(_private) : "memory");
++
++	return r;
++}
+diff --git a/components/bt/common/tinycrypt/src/hmac.c b/components/bt/common/tinycrypt/src/hmac.c
+new file mode 100644
+index 000000000..1c5ea74b5
+--- /dev/null
++++ b/components/bt/common/tinycrypt/src/hmac.c
+@@ -0,0 +1,153 @@
++/*
++ * SPDX-FileCopyrightText: 2025 Espressif Systems (Shanghai) CO LTD
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++/*
++ *  Copyright (C) 2017 by Intel Corporation, All Rights Reserved.
++ *
++ *  Redistribution and use in source and binary forms, with or without
++ *  modification, are permitted provided that the following conditions are met:
++ *
++ *    - Redistributions of source code must retain the above copyright notice,
++ *     this list of conditions and the following disclaimer.
++ *
++ *    - Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ *
++ *    - Neither the name of Intel Corporation nor the names of its contributors
++ *    may be used to endorse or promote products derived from this software
++ *    without specific prior written permission.
++ *
++ *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ *  AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ *  IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ *  ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++ *  LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ *  CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ *  SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ *  INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ *  CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ *  POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#include <tinycrypt/hmac.h>
++#include <tinycrypt/constants.h>
++#include <tinycrypt/utils.h>
++
++static void rekey(uint8_t *key, const uint8_t *new_key, unsigned int key_size)
++{
++	const uint8_t inner_pad = (uint8_t) 0x36;
++	const uint8_t outer_pad = (uint8_t) 0x5c;
++	unsigned int i;
++
++	for (i = 0; i < key_size; ++i) {
++		key[i] = inner_pad ^ new_key[i];
++		key[i + TC_SHA256_BLOCK_SIZE] = outer_pad ^ new_key[i];
++	}
++	for (; i < TC_SHA256_BLOCK_SIZE; ++i) {
++		key[i] = inner_pad; key[i + TC_SHA256_BLOCK_SIZE] = outer_pad;
++	}
++}
++
++int tc_hmac_set_key(TCHmacState_t ctx, const uint8_t *key,
++		    unsigned int key_size)
++{
++
++	/* input sanity check: */
++	if (ctx == (TCHmacState_t) 0 ||
++	    key == (const uint8_t *) 0 ||
++	    key_size == 0) {
++		return TC_CRYPTO_FAIL;
++	}
++
++	uint8_t dummy_key[key_size];
++	struct tc_hmac_state_struct dummy_state;
++
++	if (key_size <= TC_SHA256_BLOCK_SIZE) {
++		/*
++		 * The next three lines consist of dummy calls just to avoid
++		 * certain timing attacks. Without these dummy calls,
++		 * adversaries would be able to learn whether the key_size is
++		 * greater than TC_SHA256_BLOCK_SIZE by measuring the time
++		 * consumed in this process.
++		 */
++		(void)tc_sha256_init(&dummy_state.hash_state);
++		_set(dummy_key, 0, sizeof(dummy_key));
++		(void)tc_sha256_update(&dummy_state.hash_state,
++				       dummy_key,
++				       key_size);
++		(void)tc_sha256_final(&dummy_state.key[TC_SHA256_DIGEST_SIZE],
++				      &dummy_state.hash_state);
++
++		/* Actual code for when key_size <= TC_SHA256_BLOCK_SIZE: */
++		rekey(ctx->key, key, key_size);
++	} else {
++		(void)tc_sha256_init(&ctx->hash_state);
++		(void)tc_sha256_update(&ctx->hash_state, key, key_size);
++		(void)tc_sha256_final(&ctx->key[TC_SHA256_DIGEST_SIZE],
++				      &ctx->hash_state);
++		rekey(ctx->key,
++		      &ctx->key[TC_SHA256_DIGEST_SIZE],
++		      TC_SHA256_DIGEST_SIZE);
++	}
++
++	return TC_CRYPTO_SUCCESS;
++}
++
++int tc_hmac_init(TCHmacState_t ctx)
++{
++
++	/* input sanity check: */
++	if (ctx == (TCHmacState_t) 0) {
++		return TC_CRYPTO_FAIL;
++	}
++
++  (void) tc_sha256_init(&ctx->hash_state);
++  (void) tc_sha256_update(&ctx->hash_state, ctx->key, TC_SHA256_BLOCK_SIZE);
++
++	return TC_CRYPTO_SUCCESS;
++}
++
++int tc_hmac_update(TCHmacState_t ctx,
++		   const void *data,
++		   unsigned int data_length)
++{
++
++	/* input sanity check: */
++	if (ctx == (TCHmacState_t) 0) {
++		return TC_CRYPTO_FAIL;
++	}
++
++	(void)tc_sha256_update(&ctx->hash_state, data, data_length);
++
++	return TC_CRYPTO_SUCCESS;
++}
++
++int tc_hmac_final(uint8_t *tag, unsigned int taglen, TCHmacState_t ctx)
++{
++
++	/* input sanity check: */
++	if (tag == (uint8_t *) 0 ||
++	    taglen != TC_SHA256_DIGEST_SIZE ||
++	    ctx == (TCHmacState_t) 0) {
++		return TC_CRYPTO_FAIL;
++	}
++
++	(void) tc_sha256_final(tag, &ctx->hash_state);
++
++	(void)tc_sha256_init(&ctx->hash_state);
++	(void)tc_sha256_update(&ctx->hash_state,
++			       &ctx->key[TC_SHA256_BLOCK_SIZE],
++				TC_SHA256_BLOCK_SIZE);
++	(void)tc_sha256_update(&ctx->hash_state, tag, TC_SHA256_DIGEST_SIZE);
++	(void)tc_sha256_final(tag, &ctx->hash_state);
++
++	/* destroy the current state */
++	_set(ctx, 0, sizeof(*ctx));
++
++	return TC_CRYPTO_SUCCESS;
++}
+diff --git a/components/bt/common/tinycrypt/src/sha256.c b/components/bt/common/tinycrypt/src/sha256.c
+new file mode 100644
+index 000000000..53fd6191e
+--- /dev/null
++++ b/components/bt/common/tinycrypt/src/sha256.c
+@@ -0,0 +1,221 @@
++/*
++ * SPDX-FileCopyrightText: 2025 Espressif Systems (Shanghai) CO LTD
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++/*
++ *  Copyright (C) 2017 by Intel Corporation, All Rights Reserved.
++ *
++ *  Redistribution and use in source and binary forms, with or without
++ *  modification, are permitted provided that the following conditions are met:
++ *
++ *    - Redistributions of source code must retain the above copyright notice,
++ *     this list of conditions and the following disclaimer.
++ *
++ *    - Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ *
++ *    - Neither the name of Intel Corporation nor the names of its contributors
++ *    may be used to endorse or promote products derived from this software
++ *    without specific prior written permission.
++ *
++ *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ *  AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ *  IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ *  ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++ *  LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ *  CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ *  SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ *  INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ *  CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ *  POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#include <tinycrypt/sha256.h>
++#include <tinycrypt/constants.h>
++#include <tinycrypt/utils.h>
++
++static void compress(unsigned int *iv, const uint8_t *data);
++
++int tc_sha256_init(TCSha256State_t s)
++{
++	/* input sanity check: */
++	if (s == (TCSha256State_t) 0) {
++		return TC_CRYPTO_FAIL;
++	}
++
++	/*
++	 * Setting the initial state values.
++	 * These values correspond to the first 32 bits of the fractional parts
++	 * of the square roots of the first 8 primes: 2, 3, 5, 7, 11, 13, 17
++	 * and 19.
++	 */
++	_set((uint8_t *) s, 0x00, sizeof(*s));
++	s->iv[0] = 0x6a09e667;
++	s->iv[1] = 0xbb67ae85;
++	s->iv[2] = 0x3c6ef372;
++	s->iv[3] = 0xa54ff53a;
++	s->iv[4] = 0x510e527f;
++	s->iv[5] = 0x9b05688c;
++	s->iv[6] = 0x1f83d9ab;
++	s->iv[7] = 0x5be0cd19;
++
++	return TC_CRYPTO_SUCCESS;
++}
++
++int tc_sha256_update(TCSha256State_t s, const uint8_t *data, size_t datalen)
++{
++	/* input sanity check: */
++	if (s == (TCSha256State_t) 0 ||
++	    data == (void *) 0) {
++		return TC_CRYPTO_FAIL;
++	} else if (datalen == 0) {
++		return TC_CRYPTO_SUCCESS;
++	}
++
++	while (datalen-- > 0) {
++		s->leftover[s->leftover_offset++] = *(data++);
++		if (s->leftover_offset >= TC_SHA256_BLOCK_SIZE) {
++			compress(s->iv, s->leftover);
++			s->leftover_offset = 0;
++			s->bits_hashed += (TC_SHA256_BLOCK_SIZE << 3);
++		}
++	}
++
++	return TC_CRYPTO_SUCCESS;
++}
++
++int tc_sha256_final(uint8_t *digest, TCSha256State_t s)
++{
++	unsigned int i;
++
++	/* input sanity check: */
++	if (digest == (uint8_t *) 0 ||
++	    s == (TCSha256State_t) 0) {
++		return TC_CRYPTO_FAIL;
++	}
++
++	s->bits_hashed += (s->leftover_offset << 3);
++
++	s->leftover[s->leftover_offset++] = 0x80; /* always room for one byte */
++	if (s->leftover_offset > (sizeof(s->leftover) - 8)) {
++		/* there is not room for all the padding in this block */
++		_set(s->leftover + s->leftover_offset, 0x00,
++		     sizeof(s->leftover) - s->leftover_offset);
++		compress(s->iv, s->leftover);
++		s->leftover_offset = 0;
++	}
++
++	/* add the padding and the length in big-Endian format */
++	_set(s->leftover + s->leftover_offset, 0x00,
++	     sizeof(s->leftover) - 8 - s->leftover_offset);
++	s->leftover[sizeof(s->leftover) - 1] = (uint8_t)(s->bits_hashed);
++	s->leftover[sizeof(s->leftover) - 2] = (uint8_t)(s->bits_hashed >> 8);
++	s->leftover[sizeof(s->leftover) - 3] = (uint8_t)(s->bits_hashed >> 16);
++	s->leftover[sizeof(s->leftover) - 4] = (uint8_t)(s->bits_hashed >> 24);
++	s->leftover[sizeof(s->leftover) - 5] = (uint8_t)(s->bits_hashed >> 32);
++	s->leftover[sizeof(s->leftover) - 6] = (uint8_t)(s->bits_hashed >> 40);
++	s->leftover[sizeof(s->leftover) - 7] = (uint8_t)(s->bits_hashed >> 48);
++	s->leftover[sizeof(s->leftover) - 8] = (uint8_t)(s->bits_hashed >> 56);
++
++	/* hash the padding and length */
++	compress(s->iv, s->leftover);
++
++	/* copy the iv out to digest */
++	for (i = 0; i < TC_SHA256_STATE_BLOCKS; ++i) {
++		unsigned int t = *((unsigned int *) &s->iv[i]);
++		*digest++ = (uint8_t)(t >> 24);
++		*digest++ = (uint8_t)(t >> 16);
++		*digest++ = (uint8_t)(t >> 8);
++		*digest++ = (uint8_t)(t);
++	}
++
++	/* destroy the current state */
++	_set(s, 0, sizeof(*s));
++
++	return TC_CRYPTO_SUCCESS;
++}
++
++/*
++ * Initializing SHA-256 Hash constant words K.
++ * These values correspond to the first 32 bits of the fractional parts of the
++ * cube roots of the first 64 primes between 2 and 311.
++ */
++static const unsigned int k256[64] = {
++	0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1,
++	0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
++	0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786,
++	0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
++	0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147,
++	0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
++	0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b,
++	0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
++	0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a,
++	0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
++	0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
++};
++
++static inline unsigned int ROTR(unsigned int a, unsigned int n)
++{
++	return (((a) >> n) | ((a) << (32 - n)));
++}
++
++#define Sigma0(a)(ROTR((a), 2) ^ ROTR((a), 13) ^ ROTR((a), 22))
++#define Sigma1(a)(ROTR((a), 6) ^ ROTR((a), 11) ^ ROTR((a), 25))
++#define sigma0(a)(ROTR((a), 7) ^ ROTR((a), 18) ^ ((a) >> 3))
++#define sigma1(a)(ROTR((a), 17) ^ ROTR((a), 19) ^ ((a) >> 10))
++
++#define Ch(a, b, c)(((a) & (b)) ^ ((~(a)) & (c)))
++#define Maj(a, b, c)(((a) & (b)) ^ ((a) & (c)) ^ ((b) & (c)))
++
++static inline unsigned int BigEndian(const uint8_t **c)
++{
++	unsigned int n = 0;
++
++	n = (((unsigned int)(*((*c)++))) << 24);
++	n |= ((unsigned int)(*((*c)++)) << 16);
++	n |= ((unsigned int)(*((*c)++)) << 8);
++	n |= ((unsigned int)(*((*c)++)));
++	return n;
++}
++
++static void compress(unsigned int *iv, const uint8_t *data)
++{
++	unsigned int a, b, c, d, e, f, g, h;
++	unsigned int s0, s1;
++	unsigned int t1, t2;
++	unsigned int work_space[16];
++	unsigned int n;
++	unsigned int i;
++
++	a = iv[0]; b = iv[1]; c = iv[2]; d = iv[3];
++	e = iv[4]; f = iv[5]; g = iv[6]; h = iv[7];
++
++	for (i = 0; i < 16; ++i) {
++		n = BigEndian(&data);
++		t1 = work_space[i] = n;
++		t1 += h + Sigma1(e) + Ch(e, f, g) + k256[i];
++		t2 = Sigma0(a) + Maj(a, b, c);
++		h = g; g = f; f = e; e = d + t1;
++		d = c; c = b; b = a; a = t1 + t2;
++	}
++
++	for ( ; i < 64; ++i) {
++		s0 = work_space[(i+1)&0x0f];
++		s0 = sigma0(s0);
++		s1 = work_space[(i+14)&0x0f];
++		s1 = sigma1(s1);
++
++		t1 = work_space[i&0xf] += s0 + s1 + work_space[(i+9)&0xf];
++		t1 += h + Sigma1(e) + Ch(e, f, g) + k256[i];
++		t2 = Sigma0(a) + Maj(a, b, c);
++		h = g; g = f; f = e; e = d + t1;
++		d = c; c = b; b = a; a = t1 + t2;
++	}
++
++	iv[0] += a; iv[1] += b; iv[2] += c; iv[3] += d;
++	iv[4] += e; iv[5] += f; iv[6] += g; iv[7] += h;
++}
+diff --git a/components/bt/common/tinycrypt/src/utils.c b/components/bt/common/tinycrypt/src/utils.c
+new file mode 100644
+index 000000000..8f8278bb4
+--- /dev/null
++++ b/components/bt/common/tinycrypt/src/utils.c
+@@ -0,0 +1,80 @@
++/*
++ * SPDX-FileCopyrightText: 2025 Espressif Systems (Shanghai) CO LTD
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++/*
++ *  Copyright (C) 2017 by Intel Corporation, All Rights Reserved.
++ *
++ *  Redistribution and use in source and binary forms, with or without
++ *  modification, are permitted provided that the following conditions are met:
++ *
++ *    - Redistributions of source code must retain the above copyright notice,
++ *     this list of conditions and the following disclaimer.
++ *
++ *    - Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ *
++ *    - Neither the name of Intel Corporation nor the names of its contributors
++ *    may be used to endorse or promote products derived from this software
++ *    without specific prior written permission.
++ *
++ *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ *  AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ *  IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ *  ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++ *  LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ *  CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ *  SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ *  INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ *  CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ *  POSSIBILITY OF SUCH DAMAGE.
++ */
++
++/* utils.c - TinyCrypt platform-dependent run-time operations */
++
++#include <tinycrypt/utils.h>
++#include <tinycrypt/constants.h>
++
++#include <string.h>
++
++#define MASK_TWENTY_SEVEN 0x1b
++
++unsigned int _copy(uint8_t *to, unsigned int to_len,
++		   const uint8_t *from, unsigned int from_len)
++{
++	if (from_len <= to_len) {
++		(void)memcpy(to, from, from_len);
++		return from_len;
++	} else {
++		return TC_CRYPTO_FAIL;
++	}
++}
++
++void _set(void *to, uint8_t val, unsigned int len)
++{
++	(void)memset(to, val, len);
++}
++
++/*
++ * Doubles the value of a byte for values up to 127.
++ */
++uint8_t _double_byte(uint8_t a)
++{
++	return ((a<<1) ^ ((a>>7) * MASK_TWENTY_SEVEN));
++}
++
++int _compare(const uint8_t *a, const uint8_t *b, size_t size)
++{
++	const uint8_t *tempa = a;
++	const uint8_t *tempb = b;
++	uint8_t result = 0;
++
++	for (unsigned int i = 0; i < size; i++) {
++		result |= tempa[i] ^ tempb[i];
++	}
++	return result;
++}
+diff --git a/components/bt/controller/esp32s31/esp_bt_cfg.h b/components/bt/controller/esp32s31/esp_bt_cfg.h
+index 02bd3e2b1..d87bccd34 100644
+--- a/components/bt/controller/esp32s31/esp_bt_cfg.h
++++ b/components/bt/controller/esp32s31/esp_bt_cfg.h
+@@ -47,9 +47,6 @@ extern "C" {
+ #define CONFIG_BT_CTRL_BR_EDR_TX_PWR_ISCAN 4
+ 
+ #define CONFIG_BT_CTRL_BR_EDR_LEGACY_AUTH_VENDOR_EVT 1
+-
+-/* BR/EDR secure simple pairing uses PSA for ECDH, SHA-256 and HMAC */
+-#define CONFIG_BT_SMP_CRYPTO_STACK_MBEDTLS 1
+ #else
+ #define CONFIG_BTDM_CTRL_MODE_BLE_ONLY 1
+ #endif
+diff --git a/zephyr/esp32s31/CMakeLists.txt b/zephyr/esp32s31/CMakeLists.txt
+index 12a74801e..37a6c3ded 100644
+--- a/zephyr/esp32s31/CMakeLists.txt
++++ b/zephyr/esp32s31/CMakeLists.txt
+@@ -930,8 +930,20 @@ if(CONFIG_SOC_SERIES_ESP32S31)
+     zephyr_library_sources_ifdef(CONFIG_BT_CLASSIC
+       ../../components/bt/porting_btdm/controller/bredr/src/bredr.c
+       src/bt/bredr_mempool.c
++      # P-192 and P-256 ECDH, SHA-256 and HMAC for BR/EDR Secure Simple Pairing.
++      # TF-PSA-Crypto has no P-192 curve.
++      ../../components/bt/common/tinycrypt/src/ecc.c
++      ../../components/bt/common/tinycrypt/src/ecc_dh.c
++      ../../components/bt/common/tinycrypt/src/hmac.c
++      ../../components/bt/common/tinycrypt/src/sha256.c
++      ../../components/bt/common/tinycrypt/src/utils.c
+       )
+ 
++    if(CONFIG_BT_CLASSIC)
++      zephyr_library_include_directories(../../components/bt/common/tinycrypt/include)
++      zephyr_library_compile_definitions(uECC_SUPPORTS_secp192r1=1)
++    endif()
++
+     zephyr_library_include_directories(src/bt/include)
+ 
+     zephyr_library_compile_options(
+diff --git a/zephyr/esp32s31/src/bt/include/esp_tinycrypt_port.h b/zephyr/esp32s31/src/bt/include/esp_tinycrypt_port.h
+new file mode 100644
+index 000000000..d1abb9296
+--- /dev/null
++++ b/zephyr/esp32s31/src/bt/include/esp_tinycrypt_port.h
+@@ -0,0 +1,16 @@
++/*
++ * SPDX-FileCopyrightText: 2026 Espressif Systems (Shanghai) CO LTD
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#pragma once
++
++/* tinycrypt offloads point multiplication to the ECC peripheral when
++ * SOC_ECC_SUPPORTED is set. The peripheral locking and clock code it relies on
++ * is not built for Zephyr, so the software implementation is used.
++ */
++#include "soc/soc_caps.h"
++
++#undef SOC_ECC_SUPPORTED
++#define SOC_ECC_SUPPORTED 0
+-- 
+2.50.1 (Apple Git-155)
+

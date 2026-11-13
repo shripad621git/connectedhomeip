@@ -1,0 +1,34 @@
+/*
+ * Copyright (c) 2026 Project CHIP Authors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/* Diagnostic: reaches the ES8311 over a bit-banged I2C bus on the codec's I2C pins
+ * (GPIO50 SCL, GPIO51 SDA) instead of the I2C0 controller. The node label
+ * i2c_bitbang also enables the pin level log in src/devices/A2dpSink.c.
+ *
+ *   -DEXTRA_DTC_OVERLAY_FILE=speaker-a2dp/es8311-i2c-bitbang.overlay
+ */
+/delete-node/ &audio_codec;
+
+&i2c0 {
+	status = "disabled";
+};
+
+/ {
+	i2c_bitbang: i2c-bitbang {
+		compatible = "gpio-i2c";
+		status = "okay";
+		clock-frequency = <I2C_BITRATE_STANDARD>;
+		scl-gpios = <&gpio1 18 (GPIO_OPEN_DRAIN | GPIO_PULL_UP)>;
+		sda-gpios = <&gpio1 19 (GPIO_OPEN_DRAIN | GPIO_PULL_UP)>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		audio_codec: es8311@18 {
+			compatible = "everest,es8311";
+			reg = <0x18>;
+			amplifier-enable-gpios = <&gpio1 25 GPIO_ACTIVE_HIGH>;
+		};
+	};
+};

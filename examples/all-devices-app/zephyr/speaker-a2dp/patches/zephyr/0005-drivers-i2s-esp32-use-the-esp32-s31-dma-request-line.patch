@@ -1,0 +1,52 @@
+From e2100d156c6e208b0e15eff7086957f561cbebf9 Mon Sep 17 00:00:00 2001
+From: shripad621git <shripad62001@gmail.com>
+Date: Fri, 13 Nov 2026 00:45:23 +0530
+Subject: [PATCH 5/6] drivers: i2s: esp32: use the esp32-s31 dma request line
+
+The driver passed trigger 3 to the DMA controller for I2S0, which is
+correct on the other SoCs. On the ESP32-S31 each I2S unit has four
+request lines and trigger 3 is the third data line of I2S0, so the
+DMA never received a request and TX stalled with the queue full.
+Use the first request line of the unit.
+
+On hardware the stall showed as 14 blocks accepted (the whole slab)
+and every later write failing with -ENOMEM.
+---
+ drivers/i2s/i2s_esp32.c | 14 +++++++++++++-
+ 1 file changed, 13 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/i2s/i2s_esp32.c b/drivers/i2s/i2s_esp32.c
+index 90c08ee6be5..94bec7d5dbb 100644
+--- a/drivers/i2s/i2s_esp32.c
++++ b/drivers/i2s/i2s_esp32.c
+@@ -52,6 +52,18 @@ LOG_MODULE_REGISTER(i2s_esp32, CONFIG_I2S_LOG_LEVEL);
+ #endif
+ #define I2S_ESP32_DMA_BUFFER_MAX_SIZE 4092
+ 
++#if defined(CONFIG_SOC_SERIES_ESP32S31)
++#include <hal/gdma_channel.h>
++
++/* Each ESP32-S31 I2S unit has four DMA request lines, one per data line.
++ * Standard mode uses the first.
++ */
++#define I2S_ESP32_DMA_SLOT(unit)                                                                   \
++	((unit) == 0 ? SOC_GDMA_TRIG_PERIPH_I2S0CH0 : SOC_GDMA_TRIG_PERIPH_I2S1CH0)
++#else
++#define I2S_ESP32_DMA_SLOT(unit) (ESP_GDMA_TRIG_PERIPH_I2S0 + (unit))
++#endif
++
+ #define I2S_ESP32_NUM_INST_OK          DT_NUM_INST_STATUS_OKAY(espressif_esp32_i2s)
+ #define I2S_ESP32_IS_DIR_INST_EN(i, d) DT_INST_DMAS_HAS_NAME(i, d) || DT_INST_IRQ_HAS_NAME(i, d)
+ #define I2S_ESP32_IS_DIR_EN(d)         (LISTIFY(I2S_ESP32_NUM_INST_OK, I2S_ESP32_IS_DIR_INST_EN,   \
+@@ -994,7 +1006,7 @@ int IRAM_ATTR i2s_esp32_config_dma(const struct device *dev, enum i2s_dir dir,
+ #endif /* I2S_ESP32_IS_DIR_EN(tx) */
+ 	}
+ 	dma_cfg.user_data = (void *)dev;
+-	dma_cfg.dma_slot = ESP_GDMA_TRIG_PERIPH_I2S0 + dev_cfg->unit;
++	dma_cfg.dma_slot = I2S_ESP32_DMA_SLOT(dev_cfg->unit);
+ 	dma_cfg.block_count = 1;
+ 	dma_cfg.head_block = &dma_blk;
+ 
+-- 
+2.50.1 (Apple Git-155)
+

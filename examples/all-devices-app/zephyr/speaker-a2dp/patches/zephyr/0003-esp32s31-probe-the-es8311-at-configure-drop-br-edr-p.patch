@@ -1,0 +1,129 @@
+From 07ccb85859b33b04bfc41be932e682e4683576e1 Mon Sep 17 00:00:00 2001
+From: shripad621git <shripad62001@gmail.com>
+Date: Thu, 12 Nov 2026 23:50:18 +0530
+Subject: [PATCH 3/6] esp32s31: probe the es8311 at configure, drop br/edr psa
+ selects
+
+- Read the ES8311 chip ID when the codec is configured, not at boot
+- Log the I2C addresses that answer when the chip ID read fails
+- Remove the PSA selects, the BR/EDR controller now uses tinycrypt
+
+On hardware the chip ID read at boot failed with -EIO. The I2C scan
+is a diagnostic to find out whether the address or the bus is wrong.
+---
+ drivers/audio/es8311.c              | 45 ++++++++++++++++++++++-------
+ drivers/bluetooth/hci/Kconfig.esp32 | 21 --------------
+ 2 files changed, 34 insertions(+), 32 deletions(-)
+
+diff --git a/drivers/audio/es8311.c b/drivers/audio/es8311.c
+index 08ce3fd03e2..4b302740070 100644
+--- a/drivers/audio/es8311.c
++++ b/drivers/audio/es8311.c
+@@ -66,6 +66,35 @@ struct es8311_config {
+ 	struct gpio_dt_spec amplifier_enable;
+ };
+ 
++/* The codec is probed when it is configured, not at boot: the I2S controller that
++ * supplies MCLK is set up by the application before it configures the codec.
++ */
++static int es8311_check_chip_id(const struct es8311_config *cfg)
++{
++	uint8_t id;
++	int ret;
++
++	ret = i2c_reg_read_byte_dt(&cfg->i2c, REG_CHIP_ID1, &id);
++	if (ret != 0) {
++		LOG_ERR("Chip ID read at 0x%02x failed: %d", cfg->i2c.addr, ret);
++
++		for (uint16_t addr = 0x08; addr < 0x78; addr++) {
++			uint8_t byte;
++
++			if (i2c_read(cfg->i2c.bus, &byte, 1, addr) == 0) {
++				LOG_INF("I2C device answers at 0x%02x", addr);
++			}
++		}
++		return ret;
++	}
++	if (id != CHIP_ID1) {
++		LOG_ERR("Unexpected chip ID 0x%02x", id);
++		return -ENODEV;
++	}
++
++	return 0;
++}
++
+ static int es8311_configure(const struct device *dev, struct audio_codec_cfg *audiocfg)
+ {
+ 	const struct es8311_config *cfg = dev->config;
+@@ -98,6 +127,11 @@ static int es8311_configure(const struct device *dev, struct audio_codec_cfg *au
+ 		return -ENOTSUP;
+ 	}
+ 
++	ret = es8311_check_chip_id(cfg);
++	if (ret != 0) {
++		return ret;
++	}
++
+ 	ret = i2c_reg_write_byte_dt(&cfg->i2c, REG_RESET, RESET_ALL);
+ 	if (ret != 0) {
+ 		return ret;
+@@ -198,7 +232,6 @@ static DEVICE_API(audio_codec, es8311_api) = {
+ static int es8311_init(const struct device *dev)
+ {
+ 	const struct es8311_config *cfg = dev->config;
+-	uint8_t id;
+ 	int ret;
+ 
+ 	if (!i2c_is_ready_dt(&cfg->i2c)) {
+@@ -215,16 +248,6 @@ static int es8311_init(const struct device *dev)
+ 		}
+ 	}
+ 
+-	ret = i2c_reg_read_byte_dt(&cfg->i2c, REG_CHIP_ID1, &id);
+-	if (ret != 0) {
+-		LOG_ERR("Chip ID read failed: %d", ret);
+-		return ret;
+-	}
+-	if (id != CHIP_ID1) {
+-		LOG_ERR("Unexpected chip ID 0x%02x", id);
+-		return -ENODEV;
+-	}
+-
+ 	return 0;
+ }
+ 
+diff --git a/drivers/bluetooth/hci/Kconfig.esp32 b/drivers/bluetooth/hci/Kconfig.esp32
+index 3ec6637a06b..c669738dad7 100644
+--- a/drivers/bluetooth/hci/Kconfig.esp32
++++ b/drivers/bluetooth/hci/Kconfig.esp32
+@@ -64,27 +64,6 @@ config ESP32_BT_CTLR_BR_EDR_MIN_ENC_KEY_SZ_DFT
+ 	help
+ 	  Default minimum encryption key size when initiating BR/EDR encryption.
+ 
+-config ESP32_BT_CTLR_BR_EDR_CRYPTO_PSA
+-	bool
+-	default y
+-	depends on SOC_SERIES_ESP32S31
+-	select PSA_CRYPTO
+-	select MBEDTLS_CTR_DRBG_C
+-	select PSA_WANT_KEY_TYPE_ECC_KEY_PAIR_IMPORT
+-	select PSA_WANT_KEY_TYPE_ECC_KEY_PAIR_EXPORT
+-	select PSA_WANT_KEY_TYPE_ECC_KEY_PAIR_GENERATE
+-	select PSA_WANT_KEY_TYPE_ECC_PUBLIC_KEY
+-	select PSA_WANT_ECC_SECP_R1_256
+-	select PSA_WANT_ALG_ECDH
+-	select PSA_WANT_ALG_SHA_256
+-	select PSA_WANT_ALG_HMAC
+-	select PSA_WANT_KEY_TYPE_HMAC
+-	help
+-	  The ESP32-S31 BR/EDR controller calls back into PSA for the ECDH,
+-	  SHA-256 and HMAC steps of Secure Simple Pairing. TF-PSA-Crypto has
+-	  no P-192 curve, so pairing works only with peers that support
+-	  BR/EDR Secure Connections (P-256).
+-
+ endif # BT_CLASSIC
+ 
+ config ESP32_BT_CTLR_LE_MAX_CONN
+-- 
+2.50.1 (Apple Git-155)
+

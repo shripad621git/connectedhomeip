@@ -1,0 +1,27 @@
+From 8afa2fab30a0142cb9d8890237d0dd8fe18a1919 Mon Sep 17 00:00:00 2001
+From: shripad621git <shripad62001@gmail.com>
+Date: Fri, 13 Nov 2026 00:13:55 +0530
+Subject: [PATCH 3/3] fix(esp32s31): enable multi-link in dual mode
+
+ESP-IDF sets BT_CTRL_MULTI_LINK_ENABLED for the dual-mode controller.
+It tells the BLE stack that the BR/EDR stack shares the radio.
+---
+ components/bt/controller/esp32s31/esp_bt_cfg.h | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/components/bt/controller/esp32s31/esp_bt_cfg.h b/components/bt/controller/esp32s31/esp_bt_cfg.h
+index d87bccd34..32ec3e055 100644
+--- a/components/bt/controller/esp32s31/esp_bt_cfg.h
++++ b/components/bt/controller/esp32s31/esp_bt_cfg.h
+@@ -25,6 +25,8 @@ extern "C" {
+ #if defined(CONFIG_BT_CLASSIC)
+ #define CONFIG_BT_CTRL_BREDR_ENABLE 1
+ #define CONFIG_BTDM_CTRL_MODE_BTDM 1
++/* Makes the BLE stack share the radio and HCI with the BR/EDR stack */
++#define CONFIG_BT_CTRL_MULTI_LINK_ENABLED 1
+ 
+ /* BR/EDR links and buffers */
+ #define CONFIG_BT_CTRL_BR_EDR_MAX_ACL_CONN CONFIG_ESP32_BT_CTLR_BR_EDR_MAX_ACL_CONN
+-- 
+2.50.1 (Apple Git-155)
+

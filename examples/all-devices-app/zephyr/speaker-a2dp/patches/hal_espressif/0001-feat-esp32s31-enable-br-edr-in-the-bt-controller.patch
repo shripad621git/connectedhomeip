@@ -1,0 +1,177 @@
+From 23d54384126cb50a15058681d65408ecb3fc888b Mon Sep 17 00:00:00 2001
+From: shripad621git <shripad62001@gmail.com>
+Date: Thu, 12 Nov 2026 19:52:31 +0530
+Subject: [PATCH 1/3] feat(esp32s31): enable br/edr in the bt controller
+
+- Add the libbredr_app.a blob from esp32s31-bt-lib
+- Build the BR/EDR controller port when BT_CLASSIC is set
+- Run the controller in dual mode instead of BLE only
+- Map the BR/EDR link and buffer options to Zephyr Kconfig
+- Back the controller pool allocator with a Zephyr sys_heap
+
+Build tested with samples/bluetooth/classic/a2dp_sink. Not run on
+hardware yet.
+---
+ .../bt/controller/esp32s31/esp_bt_cfg.h       | 32 +++++++++++++-
+ zephyr/esp32s31/CMakeLists.txt                | 14 +++++-
+ zephyr/esp32s31/src/bt/bredr_mempool.c        | 44 +++++++++++++++++++
+ zephyr/module.yml                             |  8 ++++
+ 4 files changed, 95 insertions(+), 3 deletions(-)
+ create mode 100644 zephyr/esp32s31/src/bt/bredr_mempool.c
+
+diff --git a/components/bt/controller/esp32s31/esp_bt_cfg.h b/components/bt/controller/esp32s31/esp_bt_cfg.h
+index 063e7bd92..02bd3e2b1 100644
+--- a/components/bt/controller/esp32s31/esp_bt_cfg.h
++++ b/components/bt/controller/esp32s31/esp_bt_cfg.h
+@@ -20,9 +20,39 @@ extern "C" {
+ #define CONFIG_BT_CTRL_HCI_INTERFACE_USE_RAM 1
+ #define CONFIG_BT_CTRL_HCI_CMD_NUM 5
+ 
+-/* Controller mode: BLE only */
++/* Controller mode: dual mode when the host enables BR/EDR, BLE only otherwise */
+ #define CONFIG_BT_CTRL_BLE_ENABLE 1
++#if defined(CONFIG_BT_CLASSIC)
++#define CONFIG_BT_CTRL_BREDR_ENABLE 1
++#define CONFIG_BTDM_CTRL_MODE_BTDM 1
++
++/* BR/EDR links and buffers */
++#define CONFIG_BT_CTRL_BR_EDR_MAX_ACL_CONN CONFIG_ESP32_BT_CTLR_BR_EDR_MAX_ACL_CONN
++#define CONFIG_BT_CTRL_BR_EDR_MAX_SYNC_CONN CONFIG_ESP32_BT_CTLR_BR_EDR_MAX_SYNC_CONN
++#define CONFIG_BT_CTRL_BR_EDR_ACLU_TX_BUF_NB 4
++#define CONFIG_BT_CTRL_BR_EDR_DYNAMIC_ACLU_TX_BUF_NB 0
++#define CONFIG_BT_CTRL_BR_EDR_ACLU_RX_BUF_NB 6
++#if CONFIG_ESP32_BT_CTLR_BR_EDR_MAX_SYNC_CONN > 0
++#define CONFIG_BT_CTRL_BR_EDR_SCO_DATA_PATH_HCI 1
++#define CONFIG_BT_CTRL_BR_EDR_ESCO_EV3_2_SUPP 1
++#define CONFIG_BT_CTRL_BR_EDR_SYNC_TX_BUF_NB (2 + 2 * CONFIG_ESP32_BT_CTLR_BR_EDR_MAX_SYNC_CONN)
++#define CONFIG_BT_CTRL_BR_EDR_SYNC_RX_BUF_NB (4 * CONFIG_ESP32_BT_CTLR_BR_EDR_MAX_SYNC_CONN)
++#endif
++
++/* BR/EDR TX power in dBm */
++#define CONFIG_BT_CTRL_BR_EDR_TX_PWR_ACL_MIN (-13)
++#define CONFIG_BT_CTRL_BR_EDR_TX_PWR_ACL_MAX 4
++#define CONFIG_BT_CTRL_BR_EDR_TX_PWR_PAGE 4
++#define CONFIG_BT_CTRL_BR_EDR_TX_PWR_PSCAN 4
++#define CONFIG_BT_CTRL_BR_EDR_TX_PWR_ISCAN 4
++
++#define CONFIG_BT_CTRL_BR_EDR_LEGACY_AUTH_VENDOR_EVT 1
++
++/* BR/EDR secure simple pairing uses PSA for ECDH, SHA-256 and HMAC */
++#define CONFIG_BT_SMP_CRYPTO_STACK_MBEDTLS 1
++#else
+ #define CONFIG_BTDM_CTRL_MODE_BLE_ONLY 1
++#endif
+ 
+ /* Low-power clock source */
+ #if defined(CONFIG_ESP32_BT_LE_LP_CLK_SRC_MAIN_XTAL)
+diff --git a/zephyr/esp32s31/CMakeLists.txt b/zephyr/esp32s31/CMakeLists.txt
+index 5a994b2c4..12a74801e 100644
+--- a/zephyr/esp32s31/CMakeLists.txt
++++ b/zephyr/esp32s31/CMakeLists.txt
+@@ -35,6 +35,7 @@ if(CONFIG_SOC_SERIES_ESP32S31)
+     ../../components/bt/include/${CONFIG_SOC_SERIES}/include
+     ../../components/bt/porting_btdm/controller/btdm_common/include
+     ../../components/bt/porting_btdm/controller/ble/include
++    ../../components/bt/porting_btdm/controller/bredr/include
+     ../../components/bt/porting_btdm/transport/include
+     ../../components/driver/deprecated
+     ../../components/driver/gpio/include
+@@ -926,6 +927,11 @@ if(CONFIG_SOC_SERIES_ESP32S31)
+       src/bt/bt_cfg_default.c
+       )
+ 
++    zephyr_library_sources_ifdef(CONFIG_BT_CLASSIC
++      ../../components/bt/porting_btdm/controller/bredr/src/bredr.c
++      src/bt/bredr_mempool.c
++      )
++
+     zephyr_library_include_directories(src/bt/include)
+ 
+     zephyr_library_compile_options(
+@@ -937,8 +943,12 @@ if(CONFIG_SOC_SERIES_ESP32S31)
+       ../port/stubs/phy_stubs.c
+       )
+ 
+-    # ble, with btbb after ble_app to resolve its baseband calls
+-    esp_blobs_link(ble_app btdm_common btbb)
++    # bredr and ble, with btbb after them to resolve their baseband calls
++    if(CONFIG_BT_CLASSIC)
++      esp_blobs_link(bredr_app ble_app btdm_common btbb)
++    else()
++      esp_blobs_link(ble_app btdm_common btbb)
++    endif()
+ 
+   endif()
+ 
+diff --git a/zephyr/esp32s31/src/bt/bredr_mempool.c b/zephyr/esp32s31/src/bt/bredr_mempool.c
+new file mode 100644
+index 000000000..9e789d3f2
+--- /dev/null
++++ b/zephyr/esp32s31/src/bt/bredr_mempool.c
+@@ -0,0 +1,44 @@
++/*
++ * SPDX-FileCopyrightText: 2026 Espressif Systems (Shanghai) CO LTD
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++/* The BR/EDR controller port allocates link buffers through the TLSF API of
++ * the ESP-IDF heap component, which this HAL does not build. These functions
++ * provide the same three calls on top of a Zephyr sys_heap placed at the start
++ * of the pool. The controller serializes its own calls, as it does for TLSF.
++ */
++
++#include <stddef.h>
++#include <stdint.h>
++
++#include <zephyr/kernel.h>
++#include <zephyr/sys/sys_heap.h>
++#include <zephyr/sys/util.h>
++
++void *tlsf_create_with_pool(void *mem, size_t pool_bytes, size_t max_bytes)
++{
++	struct sys_heap *heap = mem;
++	size_t header = ROUND_UP(sizeof(*heap), sizeof(uint64_t));
++
++	ARG_UNUSED(max_bytes);
++
++	if (mem == NULL || pool_bytes <= header) {
++		return NULL;
++	}
++
++	sys_heap_init(heap, (uint8_t *)mem + header, pool_bytes - header);
++
++	return heap;
++}
++
++void *tlsf_malloc(void *tlsf, size_t size)
++{
++	return sys_heap_alloc(tlsf, size);
++}
++
++void tlsf_free(void *tlsf, void *ptr)
++{
++	sys_heap_free(tlsf, ptr);
++}
+diff --git a/zephyr/module.yml b/zephyr/module.yml
+index c39d2a673..e3ddd1ab9 100644
+--- a/zephyr/module.yml
++++ b/zephyr/module.yml
+@@ -25,6 +25,14 @@ blobs:
+     url: https://github.com/espressif/esp32s31-bt-lib/raw/3fe7c1bc6cfcf83b365d965640899352d5ff2a4c/libble_app.a
+     description: "Binary libraries supporting the ESP32 series RF subsystems"
+     doc-url: https://github.com/espressif/esp32s31-bt-lib
++  - path: lib/esp32s31/libbredr_app.a
++    sha256: 362d2750de2e812c1f5ed2bb788ec4c10bcde176aeaa10664c41819c3e0005f8
++    type: lib
++    version: '1.0'
++    license-path: zephyr/blobs/license.txt
++    url: https://github.com/espressif/esp32s31-bt-lib/raw/3fe7c1bc6cfcf83b365d965640899352d5ff2a4c/libbredr_app.a
++    description: "Binary libraries supporting the ESP32 series RF subsystems"
++    doc-url: https://github.com/espressif/esp32s31-bt-lib
+   - path: lib/esp32s31/libbtdm_common.a
+     sha256: 37131a88c7fb3724142279ae0b97cb0953d9e3cd03095f9645b438e006f11fa6
+     type: lib
+-- 
+2.50.1 (Apple Git-155)
+

@@ -1,0 +1,74 @@
+From 886338cffc58529f6d6e0e9b3c21cb76a6e30fc0 Mon Sep 17 00:00:00 2001
+From: shripad621git <shripad62001@gmail.com>
+Date: Thu, 12 Nov 2026 19:52:32 +0530
+Subject: [PATCH 1/6] drivers: bluetooth: esp32: enable br/edr on esp32-s31
+
+- Start the ESP32-S31 controller in dual mode when BT_CLASSIC is set
+- Select the PSA algorithms the BR/EDR controller uses for pairing
+- Reserve more heap for the BR/EDR controller
+
+TF-PSA-Crypto has no P-192 curve, so pairing needs a peer with
+BR/EDR Secure Connections. Build tested with the a2dp_sink sample.
+Needs the matching hal_espressif change.
+---
+ drivers/bluetooth/hci/Kconfig.esp32 | 22 ++++++++++++++++++++++
+ drivers/bluetooth/hci/hci_esp32.c   |  3 ++-
+ 2 files changed, 24 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/bluetooth/hci/Kconfig.esp32 b/drivers/bluetooth/hci/Kconfig.esp32
+index 66876fe89f0..3ec6637a06b 100644
+--- a/drivers/bluetooth/hci/Kconfig.esp32
++++ b/drivers/bluetooth/hci/Kconfig.esp32
+@@ -4,6 +4,7 @@ if BT_ESP32
+ 
+ config HEAP_MEM_POOL_ADD_SIZE_ESP_BT
+ 	int
++	default 81920 if SOC_SERIES_ESP32S31 && BT_CLASSIC
+ 	default 81920 if SOC_SERIES_ESP32S31 && ESP32_BT_LE_ISO_SUPPORT
+ 	default 65536 if SOC_SERIES_ESP32S31
+ 	default 50000 if SOC_SERIES_ESP32C2 || SOC_SERIES_ESP32C5 || SOC_SERIES_ESP32C61 || \
+@@ -63,6 +64,27 @@ config ESP32_BT_CTLR_BR_EDR_MIN_ENC_KEY_SZ_DFT
+ 	help
+ 	  Default minimum encryption key size when initiating BR/EDR encryption.
+ 
++config ESP32_BT_CTLR_BR_EDR_CRYPTO_PSA
++	bool
++	default y
++	depends on SOC_SERIES_ESP32S31
++	select PSA_CRYPTO
++	select MBEDTLS_CTR_DRBG_C
++	select PSA_WANT_KEY_TYPE_ECC_KEY_PAIR_IMPORT
++	select PSA_WANT_KEY_TYPE_ECC_KEY_PAIR_EXPORT
++	select PSA_WANT_KEY_TYPE_ECC_KEY_PAIR_GENERATE
++	select PSA_WANT_KEY_TYPE_ECC_PUBLIC_KEY
++	select PSA_WANT_ECC_SECP_R1_256
++	select PSA_WANT_ALG_ECDH
++	select PSA_WANT_ALG_SHA_256
++	select PSA_WANT_ALG_HMAC
++	select PSA_WANT_KEY_TYPE_HMAC
++	help
++	  The ESP32-S31 BR/EDR controller calls back into PSA for the ECDH,
++	  SHA-256 and HMAC steps of Secure Simple Pairing. TF-PSA-Crypto has
++	  no P-192 curve, so pairing works only with peers that support
++	  BR/EDR Secure Connections (P-256).
++
+ endif # BT_CLASSIC
+ 
+ config ESP32_BT_CTLR_LE_MAX_CONN
+diff --git a/drivers/bluetooth/hci/hci_esp32.c b/drivers/bluetooth/hci/hci_esp32.c
+index 2931a225e06..e05ec81c79f 100644
+--- a/drivers/bluetooth/hci/hci_esp32.c
++++ b/drivers/bluetooth/hci/hci_esp32.c
+@@ -775,7 +775,8 @@ static int bt_esp32_ble_init(void)
+ 	esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
+ #endif
+ 
+-#if defined(CONFIG_BT_CLASSIC) && defined(CONFIG_SOC_SERIES_ESP32)
++#if defined(CONFIG_BT_CLASSIC) &&                                                                 \
++	(defined(CONFIG_SOC_SERIES_ESP32) || defined(CONFIG_SOC_SERIES_ESP32S31))
+ 	esp_bt_mode_t mode = ESP_BT_MODE_BTDM;
+ #else
+ 	esp_bt_mode_t mode = ESP_BT_MODE_BLE;
+-- 
+2.50.1 (Apple Git-155)
+

@@ -1,0 +1,424 @@
+From 9d8d7cd615c66a1c98e232c952fb3e41550aa6e6 Mon Sep 17 00:00:00 2001
+From: shripad621git <shripad62001@gmail.com>
+Date: Thu, 12 Nov 2026 21:30:33 +0530
+Subject: [PATCH 2/6] esp32s31: add i2s nodes and the es8311 audio codec
+
+- Add the i2s0 and i2s1 nodes to the ESP32-S31 devicetree
+- Add a playback driver and binding for the Everest ES8311 codec
+- Describe the codec, the I2S pins and the NS4150B amplifier enable
+  pin on esp32s31_function_coreboard
+
+The audio pins are not in the board user guide. They follow a
+third-party configuration tested on this board and still need a
+check against the schematic. Build tested only.
+---
+ ...s31_function_coreboard_hpcore-pinctrl.dtsi |  10 +
+ .../esp32s31_function_coreboard_hpcore.dts    |  12 +
+ drivers/audio/CMakeLists.txt                  |   1 +
+ drivers/audio/Kconfig                         |   1 +
+ drivers/audio/Kconfig.es8311                  |  12 +
+ drivers/audio/es8311.c                        | 239 ++++++++++++++++++
+ dts/bindings/audio/everest,es8311.yaml        |  18 ++
+ .../espressif/esp32s31/esp32s31_common.dtsi   |  28 ++
+ 8 files changed, 321 insertions(+)
+ create mode 100644 drivers/audio/Kconfig.es8311
+ create mode 100644 drivers/audio/es8311.c
+ create mode 100644 dts/bindings/audio/everest,es8311.yaml
+
+diff --git a/boards/espressif/esp32s31_function_coreboard/esp32s31_function_coreboard_hpcore-pinctrl.dtsi b/boards/espressif/esp32s31_function_coreboard/esp32s31_function_coreboard_hpcore-pinctrl.dtsi
+index ce36da364ee..7f662d76a98 100644
+--- a/boards/espressif/esp32s31_function_coreboard/esp32s31_function_coreboard_hpcore-pinctrl.dtsi
++++ b/boards/espressif/esp32s31_function_coreboard/esp32s31_function_coreboard_hpcore-pinctrl.dtsi
+@@ -32,6 +32,16 @@
+ 		};
+ 	};
+ 
++	i2s0_default: i2s0_default {
++		group1 {
++			pinmux = <I2S0_MCLK_GPIO52>,
++				 <I2S0_O_BCK_GPIO53>,
++				 <I2S0_O_WS_GPIO55>,
++				 <I2S0_O_SD_GPIO56>,
++				 <I2S0_I_SD_GPIO54>;
++		};
++	};
++
+ 	twai0_default: twai0_default {
+ 		group1 {
+ 			pinmux = <TWAI0_TX_GPIO44>;
+diff --git a/boards/espressif/esp32s31_function_coreboard/esp32s31_function_coreboard_hpcore.dts b/boards/espressif/esp32s31_function_coreboard/esp32s31_function_coreboard_hpcore.dts
+index 7149356193e..3bcfca7c32b 100644
+--- a/boards/espressif/esp32s31_function_coreboard/esp32s31_function_coreboard_hpcore.dts
++++ b/boards/espressif/esp32s31_function_coreboard/esp32s31_function_coreboard_hpcore.dts
+@@ -73,6 +73,18 @@
+ 	pinctrl-0 = <&i2c0_default>;
+ 	pinctrl-names = "default";
+ 	status = "okay";
++
++	audio_codec: es8311@18 {
++		compatible = "everest,es8311";
++		reg = <0x18>;
++		/* NS4150B class D amplifier */
++		amplifier-enable-gpios = <&gpio1 25 GPIO_ACTIVE_HIGH>;
++	};
++};
++
++&i2s0 {
++	pinctrl-0 = <&i2s0_default>;
++	pinctrl-names = "default";
+ };
+ 
+ &gpio0 {
+diff --git a/drivers/audio/CMakeLists.txt b/drivers/audio/CMakeLists.txt
+index 073b72bdd7b..3285d9607ec 100644
+--- a/drivers/audio/CMakeLists.txt
++++ b/drivers/audio/CMakeLists.txt
+@@ -9,6 +9,7 @@ zephyr_library_sources_ifdef(CONFIG_AUDIO_CODEC_CS35LXX cs35lxx.c)
+ zephyr_library_sources_ifdef(CONFIG_AUDIO_CODEC_CS35LXX_I2C cs35lxx-i2c.c)
+ zephyr_library_sources_ifdef(CONFIG_AUDIO_CODEC_CS35LXX_SPI cs35lxx-spi.c)
+ zephyr_library_sources_ifdef(CONFIG_AUDIO_CODEC_CS43L22 cs43l22.c)
++zephyr_library_sources_ifdef(CONFIG_AUDIO_CODEC_ES8311 es8311.c)
+ zephyr_library_sources_ifdef(CONFIG_AUDIO_CODEC_DA7212 da7212.c)
+ zephyr_library_sources_ifdef(CONFIG_AUDIO_CODEC_DUMMY codec_dummy.c)
+ zephyr_library_sources_ifdef(CONFIG_AUDIO_CODEC_MAX98091 max98091.c)
+diff --git a/drivers/audio/Kconfig b/drivers/audio/Kconfig
+index 933bb0fcd79..cce8282d31a 100644
+--- a/drivers/audio/Kconfig
++++ b/drivers/audio/Kconfig
+@@ -41,6 +41,7 @@ source "drivers/audio/Kconfig.codec_dummy"
+ source "drivers/audio/Kconfig.cs35l5x"
+ source "drivers/audio/Kconfig.cs35lxx"
+ source "drivers/audio/Kconfig.cs43l22"
++source "drivers/audio/Kconfig.es8311"
+ source "drivers/audio/Kconfig.da7212"
+ source "drivers/audio/Kconfig.max98091"
+ source "drivers/audio/Kconfig.pcm1681"
+diff --git a/drivers/audio/Kconfig.es8311 b/drivers/audio/Kconfig.es8311
+new file mode 100644
+index 00000000000..b4ca883a890
+--- /dev/null
++++ b/drivers/audio/Kconfig.es8311
+@@ -0,0 +1,12 @@
++# Copyright (c) 2026 Espressif Systems (Shanghai) Co., Ltd.
++# SPDX-License-Identifier: Apache-2.0
++
++config AUDIO_CODEC_ES8311
++	bool "Everest ES8311 driver"
++	default y
++	select I2C
++	select GPIO
++	depends on DT_HAS_EVEREST_ES8311_ENABLED
++	help
++	  Enable the playback driver for the Everest ES8311 mono audio codec.
++	  The codec runs as I2S slave with MCLK at 256 times the sample rate.
+diff --git a/drivers/audio/es8311.c b/drivers/audio/es8311.c
+new file mode 100644
+index 00000000000..08ce3fd03e2
+--- /dev/null
++++ b/drivers/audio/es8311.c
+@@ -0,0 +1,239 @@
++/*
++ * Copyright (c) 2026 Espressif Systems (Shanghai) Co., Ltd.
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#define DT_DRV_COMPAT everest_es8311
++
++#include <zephyr/audio/codec.h>
++#include <zephyr/device.h>
++#include <zephyr/drivers/gpio.h>
++#include <zephyr/drivers/i2c.h>
++#include <zephyr/kernel.h>
++#include <zephyr/logging/log.h>
++#include <zephyr/sys/util.h>
++
++LOG_MODULE_REGISTER(everest_es8311, CONFIG_AUDIO_CODEC_LOG_LEVEL);
++
++#define REG_RESET          0x00
++#define REG_CLK_SOURCE     0x01
++#define REG_CLK_PRE_DIV    0x02
++#define REG_ADC_OSR        0x03
++#define REG_DAC_OSR        0x04
++#define REG_CLK_DIV        0x05
++#define REG_BCLK_DIV       0x06
++#define REG_LRCK_DIV_H     0x07
++#define REG_LRCK_DIV_L     0x08
++#define REG_SDP_IN         0x09
++#define REG_SDP_OUT        0x0A
++#define REG_ANALOG_POWER   0x0D
++#define REG_ADC_POWER      0x0E
++#define REG_DAC_POWER      0x12
++#define REG_OUTPUT_DRIVE   0x13
++#define REG_ADC_EQ         0x1C
++#define REG_DAC_MUTE       0x31
++#define REG_DAC_VOLUME     0x32
++#define REG_DAC_EQ         0x37
++#define REG_CHIP_ID1       0xFD
++
++#define CHIP_ID1           0x83
++
++#define RESET_ALL          0x1F
++#define RESET_POWER_ON     0x80
++#define RESET_MASTER_MODE  BIT(6)
++
++#define CLK_ENABLE_ALL     0x3F
++#define BCLK_INVERTED      BIT(5)
++
++#define SDP_WORD_SHIFT     2
++#define SDP_WORD_24        0
++#define SDP_WORD_16        3
++#define SDP_WORD_32        4
++
++#define DAC_MUTE_MASK      (BIT(6) | BIT(5))
++
++/* REG_DAC_VOLUME is in 0.5 dB steps and 0xBF is 0 dB */
++#define DAC_VOLUME_0DB     0xBF
++#define DAC_VOLUME_MAX     0xFF
++
++/* The only clock tree the driver sets up: MCLK pin at 256 x the sample rate */
++#define MCLK_MULTIPLE      256
++#define SAMPLE_RATE_MIN    8000
++#define SAMPLE_RATE_MAX    48000
++
++struct es8311_config {
++	struct i2c_dt_spec i2c;
++	struct gpio_dt_spec amplifier_enable;
++};
++
++static int es8311_configure(const struct device *dev, struct audio_codec_cfg *audiocfg)
++{
++	const struct es8311_config *cfg = dev->config;
++	const struct i2s_config *i2s = &audiocfg->dai_cfg.i2s;
++	uint8_t word;
++	int ret;
++
++	if (audiocfg->dai_type != AUDIO_DAI_TYPE_I2S) {
++		return -ENOTSUP;
++	}
++
++	if (i2s->frame_clk_freq < SAMPLE_RATE_MIN || i2s->frame_clk_freq > SAMPLE_RATE_MAX ||
++	    audiocfg->mclk_freq != i2s->frame_clk_freq * MCLK_MULTIPLE) {
++		LOG_ERR("Unsupported clocks: MCLK %u Hz, sample rate %u Hz", audiocfg->mclk_freq,
++			i2s->frame_clk_freq);
++		return -ENOTSUP;
++	}
++
++	switch (i2s->word_size) {
++	case 16:
++		word = SDP_WORD_16;
++		break;
++	case 24:
++		word = SDP_WORD_24;
++		break;
++	case 32:
++		word = SDP_WORD_32;
++		break;
++	default:
++		return -ENOTSUP;
++	}
++
++	ret = i2c_reg_write_byte_dt(&cfg->i2c, REG_RESET, RESET_ALL);
++	if (ret != 0) {
++		return ret;
++	}
++	k_msleep(20);
++
++	/* Register values for MCLK = 256 x fs: no pre-divider or multiplier, ADC and DAC
++	 * dividers of 1, single speed, OSR 16, BCLK = MCLK / 4, LRCK = MCLK / 256.
++	 */
++	const struct {
++		uint8_t reg;
++		uint8_t value;
++	} sequence[] = {
++		{REG_RESET, 0x00},
++		{REG_RESET, RESET_POWER_ON},
++		{REG_CLK_SOURCE, CLK_ENABLE_ALL},
++		{REG_CLK_PRE_DIV, 0x00},
++		{REG_ADC_OSR, 0x10},
++		{REG_DAC_OSR, 0x10},
++		{REG_CLK_DIV, 0x00},
++		{REG_BCLK_DIV, 0x03},
++		{REG_LRCK_DIV_H, 0x00},
++		{REG_LRCK_DIV_L, 0xFF},
++		{REG_SDP_IN, word << SDP_WORD_SHIFT},
++		{REG_SDP_OUT, word << SDP_WORD_SHIFT},
++		{REG_ANALOG_POWER, 0x01},
++		{REG_ADC_POWER, 0x02},
++		{REG_DAC_POWER, 0x00},
++		{REG_OUTPUT_DRIVE, 0x10},
++		{REG_ADC_EQ, 0x6A},
++		{REG_DAC_EQ, 0x08},
++		{REG_DAC_VOLUME, DAC_VOLUME_0DB},
++	};
++
++	ARRAY_FOR_EACH(sequence, i) {
++		ret = i2c_reg_write_byte_dt(&cfg->i2c, sequence[i].reg, sequence[i].value);
++		if (ret != 0) {
++			return ret;
++		}
++	}
++
++	return 0;
++}
++
++static void es8311_start_output(const struct device *dev)
++{
++	const struct es8311_config *cfg = dev->config;
++
++	if (cfg->amplifier_enable.port != NULL) {
++		(void)gpio_pin_set_dt(&cfg->amplifier_enable, 1);
++	}
++}
++
++static void es8311_stop_output(const struct device *dev)
++{
++	const struct es8311_config *cfg = dev->config;
++
++	if (cfg->amplifier_enable.port != NULL) {
++		(void)gpio_pin_set_dt(&cfg->amplifier_enable, 0);
++	}
++}
++
++static int es8311_set_property(const struct device *dev, audio_property_t property,
++			       audio_channel_t channel, audio_property_value_t val)
++{
++	const struct es8311_config *cfg = dev->config;
++
++	ARG_UNUSED(channel);
++
++	switch (property) {
++	case AUDIO_PROPERTY_OUTPUT_MUTE:
++		return i2c_reg_update_byte_dt(&cfg->i2c, REG_DAC_MUTE, DAC_MUTE_MASK,
++					      val.mute ? DAC_MUTE_MASK : 0);
++	case AUDIO_PROPERTY_OUTPUT_VOLUME:
++		/* val.vol is in 0.5 dB steps relative to 0 dB */
++		return i2c_reg_write_byte_dt(&cfg->i2c, REG_DAC_VOLUME,
++					     CLAMP(DAC_VOLUME_0DB + val.vol, 0, DAC_VOLUME_MAX));
++	default:
++		return -ENOTSUP;
++	}
++}
++
++static int es8311_apply_properties(const struct device *dev)
++{
++	ARG_UNUSED(dev);
++
++	return 0;
++}
++
++static DEVICE_API(audio_codec, es8311_api) = {
++	.configure = es8311_configure,
++	.start_output = es8311_start_output,
++	.stop_output = es8311_stop_output,
++	.set_property = es8311_set_property,
++	.apply_properties = es8311_apply_properties,
++};
++
++static int es8311_init(const struct device *dev)
++{
++	const struct es8311_config *cfg = dev->config;
++	uint8_t id;
++	int ret;
++
++	if (!i2c_is_ready_dt(&cfg->i2c)) {
++		return -ENODEV;
++	}
++
++	if (cfg->amplifier_enable.port != NULL) {
++		if (!gpio_is_ready_dt(&cfg->amplifier_enable)) {
++			return -ENODEV;
++		}
++		ret = gpio_pin_configure_dt(&cfg->amplifier_enable, GPIO_OUTPUT_INACTIVE);
++		if (ret != 0) {
++			return ret;
++		}
++	}
++
++	ret = i2c_reg_read_byte_dt(&cfg->i2c, REG_CHIP_ID1, &id);
++	if (ret != 0) {
++		LOG_ERR("Chip ID read failed: %d", ret);
++		return ret;
++	}
++	if (id != CHIP_ID1) {
++		LOG_ERR("Unexpected chip ID 0x%02x", id);
++		return -ENODEV;
++	}
++
++	return 0;
++}
++
++#define ES8311_INIT(inst)                                                                          \
++	static const struct es8311_config es8311_config_##inst = {                                 \
++		.i2c = I2C_DT_SPEC_INST_GET(inst),                                                 \
++		.amplifier_enable = GPIO_DT_SPEC_INST_GET_OR(inst, amplifier_enable_gpios, {0}),   \
++	};                                                                                         \
++	DEVICE_DT_INST_DEFINE(inst, es8311_init, NULL, NULL, &es8311_config_##inst, POST_KERNEL,   \
++			      CONFIG_AUDIO_CODEC_INIT_PRIORITY, &es8311_api);
++
++DT_INST_FOREACH_STATUS_OKAY(ES8311_INIT)
+diff --git a/dts/bindings/audio/everest,es8311.yaml b/dts/bindings/audio/everest,es8311.yaml
+new file mode 100644
+index 00000000000..9b652163743
+--- /dev/null
++++ b/dts/bindings/audio/everest,es8311.yaml
+@@ -0,0 +1,18 @@
++# Copyright (c) 2026 Espressif Systems (Shanghai) Co., Ltd.
++# SPDX-License-Identifier: Apache-2.0
++
++description: Everest ES8311 mono audio codec
++
++compatible: "everest,es8311"
++
++include: [i2c-device.yaml]
++
++properties:
++  reg:
++    required: true
++
++  amplifier-enable-gpios:
++    type: phandle-array
++    description: |
++      Enable pin of an external power amplifier fed by the codec output.
++      The driver asserts it while output is started.
+diff --git a/dts/riscv/espressif/esp32s31/esp32s31_common.dtsi b/dts/riscv/espressif/esp32s31/esp32s31_common.dtsi
+index 186eb76cab0..14243d3a1b9 100644
+--- a/dts/riscv/espressif/esp32s31/esp32s31_common.dtsi
++++ b/dts/riscv/espressif/esp32s31/esp32s31_common.dtsi
+@@ -232,6 +232,34 @@
+ 			status = "disabled";
+ 		};
+ 
++		i2s0: i2s@20387000 {
++			compatible = "espressif,esp32-i2s";
++			reg = <0x20387000 0x1000>;
++			#address-cells = <1>;
++			#size-cells = <0>;
++			interrupts = <I2S0_INTR_SOURCE IRQ_DEFAULT_PRIORITY 0>;
++			interrupt-parent = <&intc>;
++			clocks = <&clock ESP32_I2S0_MODULE>;
++			dmas = <&dma 2>, <&dma 3>;
++			dma-names = "rx", "tx";
++			unit = <0>;
++			status = "disabled";
++		};
++
++		i2s1: i2s@20388000 {
++			compatible = "espressif,esp32-i2s";
++			reg = <0x20388000 0x1000>;
++			#address-cells = <1>;
++			#size-cells = <0>;
++			interrupts = <I2S1_INTR_SOURCE IRQ_DEFAULT_PRIORITY 0>;
++			interrupt-parent = <&intc>;
++			clocks = <&clock ESP32_I2S1_MODULE>;
++			dmas = <&dma 4>, <&dma 5>;
++			dma-names = "rx", "tx";
++			unit = <1>;
++			status = "disabled";
++		};
++
+ 		pcnt: pcnt@20389000 {
+ 			compatible = "espressif,esp32-pcnt";
+ 			reg = <0x20389000 DT_SIZE_K(4)>;
+-- 
+2.50.1 (Apple Git-155)
+

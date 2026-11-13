@@ -1,0 +1,80 @@
+From b5c28986424774ac52d56701462373eedd6a2398 Mon Sep 17 00:00:00 2001
+From: shripad621git <shripad62001@gmail.com>
+Date: Fri, 13 Nov 2026 00:13:55 +0530
+Subject: [PATCH 4/6] drivers: bluetooth: esp32: clear the no-br/edr bit on
+ esp32-s31
+
+- Clear "BR/EDR Not Supported" in the Read Local Features reply
+- Log the LMP features when the host rejects the controller
+
+The dual-mode controller returns its BR/EDR features together with
+the "BR/EDR Not Supported" bit (bf 06 06 7e f8 1f 59 87 on hardware),
+and the host then refuses to start BR/EDR. With the bit cleared the
+host starts in dual mode. The feature dump is a diagnostic.
+---
+ drivers/bluetooth/hci/hci_esp32.c | 28 ++++++++++++++++++++++++++++
+ subsys/bluetooth/host/hci_core.c  |  1 +
+ 2 files changed, 29 insertions(+)
+
+diff --git a/drivers/bluetooth/hci/hci_esp32.c b/drivers/bluetooth/hci/hci_esp32.c
+index e05ec81c79f..d902c05d230 100644
+--- a/drivers/bluetooth/hci/hci_esp32.c
++++ b/drivers/bluetooth/hci/hci_esp32.c
+@@ -550,6 +550,30 @@ static bool is_hci_event_discardable(uint8_t evt_code, const uint8_t *payload, s
+ 	}
+ }
+ 
++#if defined(CONFIG_BT_CLASSIC) && defined(CONFIG_SOC_SERIES_ESP32S31)
++#define LMP_FEATURES_OFFSET   4 /* after num_cmds, opcode and status */
++#define LMP_NO_BREDR_BYTE     4
++#define LMP_NO_BREDR_BIT      BIT(5)
++
++/* The dual-mode controller reports the BR/EDR features together with the
++ * "BR/EDR Not Supported" bit of its BLE part, and the host refuses to start
++ * BR/EDR when that bit is set.
++ */
++static void clear_no_bredr_feature(uint8_t evt, uint8_t *payload, size_t len)
++{
++	if (evt != BT_HCI_EVT_CMD_COMPLETE ||
++	    len < LMP_FEATURES_OFFSET + sizeof(struct bt_hci_rp_read_local_features) - 1) {
++		return;
++	}
++
++	if (sys_get_le16(&payload[1]) != BT_HCI_OP_READ_LOCAL_FEATURES) {
++		return;
++	}
++
++	payload[LMP_FEATURES_OFFSET + LMP_NO_BREDR_BYTE] &= ~LMP_NO_BREDR_BIT;
++}
++#endif
++
+ static struct net_buf *bt_esp_evt_recv(uint8_t *data, size_t remaining)
+ {
+ 	bool discardable = false;
+@@ -593,7 +617,11 @@ static struct net_buf *bt_esp_evt_recv(uint8_t *data, size_t remaining)
+ 		return NULL;
+ 	}
+ 
++#if defined(CONFIG_BT_CLASSIC) && defined(CONFIG_SOC_SERIES_ESP32S31)
++	clear_no_bredr_feature(hdr.evt, net_buf_add_mem(buf, data, remaining), remaining);
++#else
+ 	net_buf_add_mem(buf, data, remaining);
++#endif
+ 
+ 	return buf;
+ }
+diff --git a/subsys/bluetooth/host/hci_core.c b/subsys/bluetooth/host/hci_core.c
+index 1712b2fe257..6a93c89b75f 100644
+--- a/subsys/bluetooth/host/hci_core.c
++++ b/subsys/bluetooth/host/hci_core.c
+@@ -4668,6 +4668,7 @@ static int hci_init(void)
+ 		}
+ 	} else if (IS_ENABLED(CONFIG_BT_CLASSIC)) {
+ 		LOG_ERR("Non-BR/EDR controller detected");
++		LOG_HEXDUMP_ERR(bt_dev.features[0], sizeof(bt_dev.features[0]), "LMP features");
+ 		return -EIO;
+ 	}
+ #if defined(CONFIG_BT_CONN)
+-- 
+2.50.1 (Apple Git-155)
+
