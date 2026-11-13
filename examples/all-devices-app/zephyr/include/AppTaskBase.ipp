@@ -41,6 +41,9 @@
 
 #include "Buttons.h"
 #include "devices/ZephyrOnOffLight.h"
+#if CONFIG_ALL_DEVICES_SPEAKER_A2DP_SINK
+#include "devices/ZephyrSpeaker.h"
+#endif // CONFIG_ALL_DEVICES_SPEAKER_A2DP_SINK
 
 #if CHIP_DEVICE_CONFIG_ENABLE_THREAD
 #include <device/types/root-node/features/ThreadFeature.h>
@@ -276,6 +279,15 @@ CHIP_ERROR AppTaskBase<Derived>::RegisterDeviceCreators()
             });
         });
     }
+
+#if CONFIG_ALL_DEVICES_SPEAKER_A2DP_SINK
+    if constexpr (ALL_DEVICES_ENABLE_SPEAKER)
+    {
+        NoHooksDeviceFactory::GetInstance().RegisterCreator("speaker", [this]() {
+            return NoHooksDeviceFactory::MakeDevice<ZephyrSpeaker>(ZephyrSpeaker::Context{ .timerDelegate = mTimerDelegate });
+        });
+    }
+#endif // CONFIG_ALL_DEVICES_SPEAKER_A2DP_SINK
 
     return CHIP_NO_ERROR;
 }

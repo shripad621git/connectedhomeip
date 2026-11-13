@@ -188,6 +188,15 @@ if(ALL_DEVICES_ENABLE_ON_OFF_LIGHT)
     )
 endif()
 
+if(CONFIG_ALL_DEVICES_SPEAKER_A2DP_SINK)
+    target_sources(app PRIVATE
+        include/devices/A2dpSink.h
+        include/devices/ZephyrSpeaker.h
+        src/devices/A2dpSink.c
+        src/devices/ZephyrSpeaker.cpp
+    )
+endif()
+
 # Matches CHIP_DEVICE_CONFIG_ENABLE_THREAD, which AppTaskBase.ipp gates on.
 if(CONFIG_OPENTHREAD)
     target_sources(app PRIVATE

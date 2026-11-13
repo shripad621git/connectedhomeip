@@ -17,6 +17,7 @@
 / {
 	aliases {
 		led0 = &light_led;
+		i2s-codec-tx = &i2s0;
 	};
 
 	leds {
@@ -30,3 +31,11 @@
 	};
 };
 
+/* I2S output to the on-board ES8311 codec; the I2S driver needs the DMA controller */
+&i2s0 {
+	status = "okay";
+};
+
+&dma {
+	status = "okay";
+};
