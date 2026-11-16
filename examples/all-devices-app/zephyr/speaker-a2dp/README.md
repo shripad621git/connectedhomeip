@@ -58,40 +58,95 @@ The application code is in the parent folder:
 | Toolchain        | Zephyr SDK 1.0.1 (`riscv64-zephyr-elf`)                               |                |                      |
 | Flasher          | esptool 5.6.0                                                         |                |                      |
 
-## Setting up the Zephyr workspace
+## Setting up from scratch
 
-Create the workspace for the pull request as described in
-`examples/lighting-app/esp32_zephyr/README.md`, section "ESP32-S31
-(experimental)". Then apply the patches and fetch the extra pieces:
+Prerequisites:
+
+-   A Matter build environment, see `docs/guides/BUILDING.md`.
+-   Zephyr SDK 1.0.1 or newer with the `riscv64-zephyr-elf` toolchain.
+-   Python 3.12 or newer for the Zephyr venv.
+
+The steps were checked on 2026-11-16: both pull requests were still at the
+commits below, and the patches applied to clean checkouts of those commits
+with `git am` and gave the same source trees the tested image was built from.
+A complete run of these steps on a new machine was not done.
+
+### 1. Get this branch
+
+In an existing `connectedhomeip` checkout:
+
+```shell
+export CHIP=~/esp/connectedhomeip
+cd "$CHIP"
+git fetch https://github.com/shripad621git/connectedhomeip esp32s31-zephyr-speaker-a2dp
+git checkout -b esp32s31-zephyr-speaker-a2dp FETCH_HEAD
+export PATCHES="$CHIP/examples/all-devices-app/zephyr/speaker-a2dp/patches"
+```
+
+### 2. Create the Zephyr workspace at the pull request commits
 
 ```shell
 export ZEPHYR_WORKSPACE=~/zephyr-s31-pr125547
-export CHIP=~/esp/connectedhomeip
-export PATCHES="$CHIP/examples/all-devices-app/zephyr/speaker-a2dp/patches"
 
-cd "$ZEPHYR_WORKSPACE/zephyr"
-git checkout -b s31-classic-bt 0beac8d8344f
-git am "$PATCHES"/zephyr/*.patch
+mkdir -p "$ZEPHYR_WORKSPACE" && cd "$ZEPHYR_WORKSPACE"
+python3 -m venv .venv
+.venv/bin/pip install west esptool
+source .venv/bin/activate
 
-cd "$ZEPHYR_WORKSPACE/modules/hal/espressif"
-git checkout -b s31-classic-bt c92bdba14303
-git am "$PATCHES"/hal_espressif/*.patch
+west init -m https://github.com/zephyrproject-rtos/zephyr .
+git -C zephyr fetch origin pull/125547/head
+git -C zephyr checkout -b s31-classic-bt 0beac8d8344f
+west update
+git -C modules/hal/espressif checkout -b s31-classic-bt c92bdba14303
+```
 
-cd "$ZEPHYR_WORKSPACE"
-# The A2DP profile needs the SBC codec module
+`west update` fetches every Zephyr module, which takes a while and several GB.
+To fetch only what this build needs, run this before `west update`:
+
+```shell
 west config manifest.project-filter -- "-.*,+hal_espressif,+mbedtls,+tf-psa-crypto,+mcuboot,+openthread,+hostap,+picolibc,+zcbor,+cmsis_6,+libsbc"
-west update libsbc
-# Fetches libbredr_app.a, the BR/EDR controller library added by the HAL patch
+```
+
+If a pull request has been updated since, its old commit may not come with
+`pull/<n>/head`. Fetch it by its full hash, for example
+`git -C zephyr fetch origin 0beac8d8344f45757553d4fd7130652cf09e2e35`.
+
+### 3. Apply the patches
+
+```shell
+git -C zephyr am "$PATCHES"/zephyr/*.patch
+git -C modules/hal/espressif am "$PATCHES"/hal_espressif/*.patch
+```
+
+The second command prints whitespace warnings for the tinycrypt sources. They
+are warnings only. Each repository must end with the patches on top:
+
+```shell
+git -C zephyr log --oneline -1                 # drivers: gpio: esp32: use the gpio base for port 1 registers
+git -C modules/hal/espressif log --oneline -1  # fix(esp32s31): enable multi-link in dual mode
+```
+
+### 4. Install the Python packages and fetch the blobs
+
+```shell
+pip install -r zephyr/scripts/requirements.txt
+pip install -r "$CHIP/scripts/setup/requirements.build.txt" \
+            -r "$CHIP/scripts/setup/requirements.zephyr.txt"
+# After the HAL patches: also fetches libbredr_app.a, the BR/EDR controller library
 west blobs fetch hal_espressif
 ```
 
-Do not run a plain `west update` afterwards. The manifest of the pull request
+Do not run `west update` again afterwards. The manifest of the pull request
 pins `hal_espressif` to `pull/696/head`, and the update would move the HAL off
 the `s31-classic-bt` branch.
 
 ## Building
 
+In every new terminal, activate the Matter environment first and then the
+Zephyr venv:
+
 ```shell
+export CHIP=~/esp/connectedhomeip ZEPHYR_WORKSPACE=~/zephyr-s31-pr125547
 cd "$CHIP"
 source scripts/activate.sh
 source "$ZEPHYR_WORKSPACE/.venv/bin/activate"
@@ -134,6 +189,9 @@ the fabric of a different application.
 ## Testing
 
 ### 1. Commission
+
+Build chip-tool for the host if needed, for example on an Apple silicon Mac:
+`./scripts/build/build_examples.py --target darwin-arm64-chip-tool build`.
 
 ```shell
 chip-tool pairing ble-wifi 1 <SSID> <PASSWORD> 20202021 3840
