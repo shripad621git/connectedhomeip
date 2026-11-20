@@ -102,14 +102,21 @@ static bool sStarted;
 
 #if IS_ENABLED(CONFIG_ALL_DEVICES_SPEAKER_AUDIO_UDP_TAP)
 #include <zephyr/net/socket.h>
+#include <zephyr/sys/mem_stats.h>
+#include <zephyr/sys/sys_heap.h>
 
 #define TAP_HEADER_BYTES 8
-#define TAP_MAX_SAMPLES 128
+#define TAP_FRAME_SAMPLES 128
+/* Five frames per datagram: 1288 bytes, below the Wi-Fi MTU, and a fifth of the packet rate */
+#define TAP_DATAGRAM_SAMPLES (5 * TAP_FRAME_SAMPLES)
 
 /* Written and read on the Bluetooth RX thread only */
 static int sTapSocket = -1;
 static struct sockaddr_in sTapHost;
-static uint32_t sTapSequence;
+static uint8_t sTapDatagram[TAP_HEADER_BYTES + TAP_DATAGRAM_SAMPLES * sizeof(int16_t)];
+static size_t sTapSamples;
+/* Index of the first sample of the datagram that is being filled */
+static uint32_t sTapSampleIndex;
 static uint32_t sTapSent;
 static uint32_t sTapFailed;
 
@@ -137,35 +144,58 @@ static void OpenTap(void)
 		CONFIG_ALL_DEVICES_SPEAKER_AUDIO_UDP_TAP_PORT);
 }
 
-/* Sends the left channel of one decoded stereo frame */
+static void SendTapDatagram(uint32_t sampleRate)
+{
+	sys_put_le32(sTapSampleIndex, &sTapDatagram[0]);
+	sys_put_le32(sampleRate, &sTapDatagram[4]);
+
+	if (zsock_sendto(sTapSocket, sTapDatagram,
+			 TAP_HEADER_BYTES + sTapSamples * sizeof(int16_t), ZSOCK_MSG_DONTWAIT,
+			 (struct sockaddr *)&sTapHost, sizeof(sTapHost)) < 0) {
+		sTapFailed++;
+	} else {
+		sTapSent++;
+	}
+
+	sTapSampleIndex += sTapSamples;
+	sTapSamples = 0;
+}
+
+/* Adds the left channel of one decoded stereo frame to the datagram, and sends a full one */
 static void TapPcmFrame(const int16_t *stereo, size_t sampleCount, uint32_t sampleRate)
 {
-	static uint8_t datagram[TAP_HEADER_BYTES + TAP_MAX_SAMPLES * sizeof(int16_t)];
-	const size_t monoCount = MIN(sampleCount / 2, TAP_MAX_SAMPLES);
+	const size_t monoCount = MIN(sampleCount / 2, TAP_FRAME_SAMPLES);
 
 	if (sTapSocket < 0) {
 		return;
 	}
 
-	sys_put_le32(sTapSequence++, &datagram[0]);
-	sys_put_le32(sampleRate, &datagram[4]);
 	for (size_t i = 0; i < monoCount; i++) {
-		sys_put_le16((uint16_t)stereo[2 * i], &datagram[TAP_HEADER_BYTES + 2 * i]);
+		sys_put_le16((uint16_t)stereo[2 * i],
+			     &sTapDatagram[TAP_HEADER_BYTES + 2 * (sTapSamples + i)]);
 	}
+	sTapSamples += monoCount;
 
-	if (zsock_sendto(sTapSocket, datagram, TAP_HEADER_BYTES + monoCount * sizeof(int16_t),
-			 ZSOCK_MSG_DONTWAIT, (struct sockaddr *)&sTapHost, sizeof(sTapHost)) < 0) {
-		sTapFailed++;
-	} else {
-		sTapSent++;
+	if (sTapSamples + TAP_FRAME_SAMPLES > TAP_DATAGRAM_SAMPLES) {
+		SendTapDatagram(sampleRate);
 	}
 }
 
 static void ReportTap(void)
 {
-	LOG_INF("Audio tap: %u frames sent, %u not sent", sTapSent, sTapFailed);
+	LOG_INF("Audio tap: %u datagrams sent, %u not sent", sTapSent, sTapFailed);
 	sTapSent = 0;
 	sTapFailed = 0;
+
+#if IS_ENABLED(CONFIG_SYS_HEAP_RUNTIME_STATS)
+	extern struct k_heap _system_heap;
+	struct sys_memory_stats heap;
+
+	if (sys_heap_runtime_stats_get(&_system_heap.heap, &heap) == 0) {
+		LOG_INF("System heap: %u free, %u allocated, %u peak", (unsigned int)heap.free_bytes,
+			(unsigned int)heap.allocated_bytes, (unsigned int)heap.max_allocated_bytes);
+	}
+#endif
 }
 #else
 static void OpenTap(void) {}
@@ -187,8 +217,8 @@ static void ReportTap(void) {}
 #define CODEC_MCLK_MULTIPLE 256
 /* Frames queued before the I2S output starts, to absorb radio jitter */
 #define PLAYBACK_PRIME_FRAMES (CONFIG_I2S_ESP32_TX_BLOCK_COUNT * 2 / 5)
-/* The codec volume is in 0.5 dB steps; level 1 maps to -48 dB */
-#define CODEC_MIN_VOLUME_HALF_DB (-96)
+/* audio_codec volume is in dB; level 1 maps to this value */
+#define CODEC_MIN_VOLUME_DB (-48)
 
 K_MEM_SLAB_DEFINE_STATIC(sPcmSlab, PCM_FRAME_BYTES, CONFIG_I2S_ESP32_TX_BLOCK_COUNT + 2, 4);
 
@@ -221,13 +251,14 @@ static void ApplyCodecVolume(void)
 	value.mute = volume == 0;
 	(void)audio_codec_set_property(sCodec, AUDIO_PROPERTY_OUTPUT_MUTE, AUDIO_CHANNEL_ALL,
 				       value);
-	if (volume == 0) {
-		return;
+	if (volume != 0) {
+		value.vol = CODEC_MIN_VOLUME_DB * (MAX_VOLUME - volume) / (MAX_VOLUME - 1);
+		(void)audio_codec_set_property(sCodec, AUDIO_PROPERTY_OUTPUT_VOLUME,
+					       AUDIO_CHANNEL_ALL, value);
 	}
 
-	value.vol = CODEC_MIN_VOLUME_HALF_DB * (MAX_VOLUME - volume) / (MAX_VOLUME - 1);
-	(void)audio_codec_set_property(sCodec, AUDIO_PROPERTY_OUTPUT_VOLUME, AUDIO_CHANNEL_ALL,
-				       value);
+	/* The codec API only stores properties until they are applied. */
+	(void)audio_codec_apply_properties(sCodec);
 }
 
 static void ConfigureCodec(void)
@@ -247,6 +278,11 @@ static void ConfigureCodec(void)
 	int err;
 
 	sCodecAttempted = true;
+	if (!device_is_ready(sCodec)) {
+		LOG_ERR("Audio codec not ready");
+		return;
+	}
+
 	err = audio_codec_configure(sCodec, &codec);
 	if (err != 0) {
 		LOG_ERR("Audio codec configuration failed: %d", err);
@@ -276,8 +312,8 @@ static void ConfigurePlayback(uint32_t sampleRate)
 	sCodecConfigured = false;
 	sSampleRate = sampleRate;
 
-	if (!device_is_ready(sI2s) || !device_is_ready(sCodec)) {
-		LOG_ERR("I2S output or audio codec not ready");
+	if (!device_is_ready(sI2s)) {
+		LOG_ERR("I2S output not ready");
 		return;
 	}
 

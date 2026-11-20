@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Capture a whole song from the Matter speaker app's audio tap and play it.
 
-The board sends each decoded audio frame as a UDP datagram: sequence number
+The board sends the decoded audio in UDP datagrams: index of the first sample
 (u32 LE), sample rate (u32 LE), then mono 16-bit little-endian samples.
 
-The capture starts with the first frame that is not silence and ends when no
+The capture starts with the first datagram that is not silence and ends when no
 audio has arrived for a while (the song ended or was paused), or on Ctrl+C.
-Frames lost on the way are replaced with silence so the timing stays right.
+Samples lost on the way are replaced with silence so the timing stays right.
 
 Usage:
     python3 capture_song.py [output.wav] [--idle SECONDS] [--port PORT] [--no-play]
@@ -21,7 +21,7 @@ import time
 import wave
 
 HEADER = struct.Struct("<II")
-MAX_GAP_FRAMES = 2000  # do not write more than ~6 s of silence for one gap
+MAX_GAP_SAMPLES = 6 * 48000  # do not write more than ~6 s of silence for one gap
 
 
 def is_silent(pcm: bytes) -> bool:
@@ -51,7 +51,7 @@ def main() -> int:
     wav = None
     rate = 0
     expected = None
-    received = lost = samples = skipped_silent = 0
+    lost = samples = skipped_silent = 0
     last_audio = None
     last_report = time.time()
     sender = None
@@ -68,8 +68,9 @@ def main() -> int:
 
             if len(data) <= HEADER.size:
                 continue
-            seq, frame_rate = HEADER.unpack_from(data)
+            first_sample, frame_rate = HEADER.unpack_from(data)
             pcm = data[HEADER.size:]
+            count = len(pcm) // 2
             now = time.time()
 
             if wav is None:
@@ -77,7 +78,7 @@ def main() -> int:
                 # connect. Wait for real sound before starting the file.
                 if is_silent(pcm):
                     skipped_silent += 1
-                    expected = seq + 1
+                    expected = first_sample + count
                     if now - last_report >= 5:
                         print("  stream is open but silent; waiting for sound...")
                         last_report = now
@@ -87,28 +88,27 @@ def main() -> int:
                 wav.setnchannels(1)
                 wav.setsampwidth(2)
                 wav.setframerate(rate)
-                expected = seq
+                expected = first_sample
                 last_report = now
                 print(f"Sound detected from {sender[0]}: {rate} Hz, mono, 16-bit. Capturing...")
 
-            if seq < expected:
+            if first_sample < expected:
                 # The board restarted its counter (new stream): carry on from here.
-                expected = seq
-            gap = seq - expected
+                expected = first_sample
+            gap = first_sample - expected
             if gap > 0:
                 lost += gap
-                fill = min(gap, MAX_GAP_FRAMES)
-                wav.writeframes(b"\x00" * (len(pcm) * fill))
-                samples += (len(pcm) // 2) * fill
-            expected = seq + 1
+                fill = min(gap, MAX_GAP_SAMPLES)
+                wav.writeframes(b"\x00\x00" * fill)
+                samples += fill
+            expected = first_sample + count
 
-            wav.writeframes(pcm)
-            received += 1
-            samples += len(pcm) // 2
+            wav.writeframes(pcm[: count * 2])
+            samples += count
             last_audio = now
 
             if now - last_report >= 5:
-                print(f"  {samples / rate:6.1f} s captured, {lost} frames lost", end="\r", flush=True)
+                print(f"  {samples / rate:6.1f} s captured, {lost / rate:.1f} s lost", end="\r", flush=True)
                 last_report = now
     except KeyboardInterrupt:
         print("\nStopped by Ctrl+C.")
@@ -123,10 +123,9 @@ def main() -> int:
         return 1
 
     wav.close()
-    total = received + lost
     duration = samples / rate
     print(f"Saved {args.output}: {int(duration // 60)} min {duration % 60:.1f} s, "
-          f"{received} frames received, {lost} lost ({100.0 * lost / max(total, 1):.2f}%)")
+          f"{lost / rate:.1f} s lost ({100.0 * lost / max(samples, 1):.2f}%)")
 
     if not args.no_play:
         print("Playing (Ctrl+C to stop)...")
