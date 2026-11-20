@@ -14,9 +14,12 @@
  * limitations under the License.
  */
 
+#include <zephyr/dt-bindings/gpio/gpio.h>
+
 / {
 	aliases {
 		led0 = &light_led;
+		i2s-codec-tx = &i2s0;
 	};
 
 	leds {
@@ -30,3 +33,27 @@
 	};
 };
 
+&i2c0 {
+	audio_codec: audio-codec@18 {
+		compatible = "everest,es8311";
+		reg = <0x18>;
+	};
+};
+
+/* NS4150B speaker amplifier enable on GPIO57 */
+&gpio1 {
+	speaker-amp-en-hog {
+		gpio-hog;
+		gpios = <25 GPIO_ACTIVE_HIGH>;
+		output-high;
+	};
+};
+
+/* I2S output to the on-board ES8311 codec; the I2S driver needs the DMA controller */
+&i2s0 {
+	status = "okay";
+};
+
+&dma {
+	status = "okay";
+};

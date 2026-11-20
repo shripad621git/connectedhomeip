@@ -19,6 +19,36 @@ mainmenu "Matter All-Devices Zephyr"
 rsource "Kconfig.defaults"
 rsource "Kconfig.devices"
 
+config ALL_DEVICES_SPEAKER_A2DP_SINK
+	bool "Speaker device receives audio as a Bluetooth Classic A2DP sink"
+	depends on ALL_DEVICES_DEVICE_SPEAKER
+	depends on BT_A2DP_SINK
+	help
+	  Replace the logging Speaker with one that makes the node discoverable
+	  as an A2DP sink once it is on a fabric. On/Off and Level Control of
+	  the Speaker endpoint set the volume of the sink.
+
+config ALL_DEVICES_SPEAKER_AUDIO_UDP_TAP
+	bool "Send the decoded speaker audio to a host over UDP"
+	depends on ALL_DEVICES_SPEAKER_A2DP_SINK
+	depends on NET_SOCKETS && NET_IPV4 && NET_UDP
+	help
+	  Send the decoded audio to a host in UDP datagrams, so that the
+	  received audio can be checked on a board without audio output.
+	  A datagram is the 32-bit little-endian index of its first sample,
+	  the 32-bit little-endian sample rate and the mono 16-bit
+	  little-endian samples.
+
+config ALL_DEVICES_SPEAKER_AUDIO_UDP_TAP_HOST
+	string "IPv4 address of the host that receives the audio"
+	depends on ALL_DEVICES_SPEAKER_AUDIO_UDP_TAP
+	default "255.255.255.255"
+
+config ALL_DEVICES_SPEAKER_AUDIO_UDP_TAP_PORT
+	int "UDP port of the host that receives the audio"
+	depends on ALL_DEVICES_SPEAKER_AUDIO_UDP_TAP
+	default 5005
+
 if NET_L2_OPENTHREAD
 choice OPENTHREAD_DEVICE_TYPE
 	default OPENTHREAD_FTD
