@@ -369,6 +369,7 @@ def BuildEsp32ZephyrTarget() -> BuildTarget:
     target.AppendFixedTargets([
         TargetPart('c6devkitc', board=Esp32ZephyrBoard.C6_DEVKITC),
         TargetPart('c3devkitm', board=Esp32ZephyrBoard.C3_DEVKITM),
+        TargetPart('h2devkitm', board=Esp32ZephyrBoard.H2_DEVKITM),
     ])
 
     # applications

@@ -9,10 +9,12 @@ running Zephyr RTOS.
 | -------------------------------- | -------- | ------------------------------------ |
 | `esp32c6_devkitc/esp32c6/hpcore` | ESP32-C6 | Wi-Fi (2.4 GHz) or Thread, BLE setup |
 | `esp32c3_devkitm`                | ESP32-C3 | Wi-Fi (2.4 GHz), BLE setup           |
+| `esp32h2_devkitm`                | ESP32-H2 | Thread, BLE setup                    |
 
-The light output is GPIO2 on ESP32-C6 and GPIO3 on ESP32-C3 (`led0` alias in the
-board overlay). Neither DevKit has an LED on that pin (the on-board LED is a
-WS2812 on GPIO8), so connect an external LED to see the light state.
+The light output is GPIO2 on ESP32-C6, GPIO3 on ESP32-C3 and GPIO5 on ESP32-H2
+(`led0` alias in the board overlay). None of the DevKits has an LED on that pin
+(the on-board LED is a WS2812 on GPIO8), so connect an external LED to see the
+light state.
 
 ## Prerequisites
 
@@ -70,7 +72,9 @@ cd "$CHIP/examples/lighting-app/esp32_zephyr"
 west build -b esp32c6_devkitc/esp32c6/hpcore
 ```
 
-For ESP32-C3, use `-b esp32c3_devkitm`.
+For ESP32-C3, use `-b esp32c3_devkitm`. For ESP32-H2, use `-b esp32h2_devkitm`;
+the ESP32-H2 has no Wi-Fi radio, so its board configuration always builds the
+Thread variant and `overlay-thread.conf` is not needed.
 
 -   Pristine build (after changing Kconfig or board files):
 
@@ -94,7 +98,8 @@ For ESP32-C3, use `-b esp32c3_devkitm`.
         "./scripts/build/build_examples.py --target esp32-zephyr-c6devkitc-light build"
     ```
 
-    For ESP32-C3, use `--target esp32-zephyr-c3devkitm-light`.
+    For ESP32-C3, use `--target esp32-zephyr-c3devkitm-light`. For ESP32-H2, use
+    `--target esp32-zephyr-h2devkitm-light`.
 
 -   On-network commissioning build (Wi-Fi only, no BLE, provisioned from the
     Zephyr shell):
@@ -110,7 +115,7 @@ For ESP32-C3, use `-b esp32c3_devkitm`.
     uart:~$ wifi connect -s "MyNetwork" -p "MyPassword" -k 1
     ```
 
--   Thread only build (Wi-Fi radio off, BLE-Thread commissioning):
+-   Thread only build on ESP32-C6 (Wi-Fi radio off, BLE-Thread commissioning):
 
     ```shell
     west build -p always -b esp32c6_devkitc/esp32c6/hpcore -- -DEXTRA_CONF_FILE=overlay-thread.conf
@@ -147,7 +152,7 @@ The example uses the test passcode `20202021` and discriminator `3840`.
     ./out/linux-x64-chip-tool/chip-tool pairing onnetwork <NODE ID> 20202021
     ```
 
--   Commission over BLE-Thread (Thread only build): requires a Thread Border
+-   Commission over BLE-Thread (Thread only build, or ESP32-H2): requires a Thread Border
     Router reachable from the host running `chip-tool`. Get the active
     operational dataset as a hex TLV from the Border Router (for example
     `ot-ctl dataset active -x`):
