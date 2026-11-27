@@ -1,0 +1,49 @@
+/*
+ * Copyright (c) 2026 Project CHIP Authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include <zephyr/dt-bindings/gpio/gpio.h>
+
+/ {
+	aliases {
+		i2s-codec-tx = &i2s0;
+	};
+};
+
+/* On-board ES8311 codec; its address pin CE is tied to ground */
+&i2c0 {
+	audio_codec: audio-codec@18 {
+		compatible = "everest,es8311";
+		reg = <0x18>;
+	};
+};
+
+/* NS4150B speaker amplifier enable on GPIO57 */
+&gpio1 {
+	speaker-amp-en-hog {
+		gpio-hog;
+		gpios = <25 GPIO_ACTIVE_HIGH>;
+		output-high;
+	};
+};
+
+/* I2S output to the codec; the I2S driver needs the DMA controller */
+&i2s0 {
+	status = "okay";
+};
+
+&dma {
+	status = "okay";
+};
